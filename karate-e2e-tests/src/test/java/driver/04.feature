@@ -9,7 +9,7 @@ Scenario:
 And match driver.cookies contains deep cookie1
 And match cookie('foo') contains deep cookie1
 
-* def cookie2 = { name: 'hello', value: 'world' }
+* def cookie2 = { name: 'hello', value: 'world', domain: 'foo.bar', path: '/' }
 * cookie(cookie2)
 * match driver.cookies contains deep cookie2
 
@@ -22,7 +22,7 @@ And match cookie('foo') contains deep cookie1
 * match driver.cookies == '#[0]'
 
 # set multiple cookies at once e.g. from an API call
-* def data = [{ name: 'one', value: '1' }, { name: 'two', value: '2' }]
+* def data = [{ name: 'one', value: '1', domain: 'foo.bar', path: '/' }, { name: 'two', value: '2', domain: 'foo.bar', path: '/' }]
 * driver.cookies = data
 * match driver.cookies contains deep data
 

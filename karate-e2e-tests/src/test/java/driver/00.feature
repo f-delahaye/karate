@@ -40,16 +40,16 @@ Scenario:
 # element position
 * call read('10.feature')
 
-* if (driverType == 'playwright') karate.abort()
+# * if (driverType == 'playwright') karate.abort()
 
 # switchPage()
-* if (driverType == 'chrome' && !skipSlowTests) karate.call('11.feature')
+* call read('11.feature')
 
 # switchPage() with external URLs
-# * if (driverType == 'chrome' && !skipSlowTests) karate.call('13.feature')
+* call read('13.feature')
 
 # survive Target.detachedFromTarget with nested iframes
-* if (driverType == 'chrome' && !skipSlowTests) karate.call('14.feature')
+* call read('14.feature')
 
 # xpath locators
 * call read('15.feature')
@@ -59,3 +59,9 @@ Scenario:
 
 # switch to root session on page close
 * call read('17.feature')
+
+# retry and submit
+* call read('18.feature')
+
+# friendly locators
+* call read('19.feature')

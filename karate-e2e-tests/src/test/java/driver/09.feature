@@ -16,3 +16,4 @@ Scenario: friendly locators
 # find all, contains match
 * def list2 = locateAll('{^}Text')
 * assert list2.length == 2
+* print list2[0].attribute('class') == 'div-01'
