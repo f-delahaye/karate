@@ -197,7 +197,7 @@ public class MatchOperation {
                 case CONTAINS_ANY:
                 case CONTAINS_ONLY:
                 case CONTAINS_DEEP:
-                case CONTAINS_ONLY_DEEP:
+//                case CONTAINS_ONLY_DEEP: see issue 2525
                 case CONTAINS_ANY_DEEP:
                     // don't tamper with strings on the RHS that represent arrays or objects
                     if (!expected.isList() && !(expected.isString() && expected.isArrayObjectOrReference())) {

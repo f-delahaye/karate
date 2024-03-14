@@ -391,6 +391,15 @@ class FeatureRuntimeTest {
         run("schema-like.feature");
     }
 
+    //See 2515
+    @Test
+    void containsOnlyDeepDoesNotMatchItem() {
+        // !contains only deep not supported, so we can't avoid the test failing.
+        fail = true;
+        String errorMessages = run("contains-only-deep-does-not-match-item.feature").result.getErrorMessages();
+        assertTrue(errorMessages.contains("data types don't match (LIST:MAP)"), errorMessages);
+    }
+    
     @Test
     void testSortArray() {
         run("sort-array.feature");
