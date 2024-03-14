@@ -136,6 +136,27 @@ Then match response ==
 * def partDeep = { a: [1] }
 * match actual contains deep part
 
+# contains only deep
+* def shuffledDeep = [{ a: [2, 1], b: 'x' }, { a: [4, 3], b: 'y' }]
+* match actualDeep != shuffledDeep
+* match actualDeep contains only deep shuffledDeep
+# #2515 contains only shortcut (^^) is actually converted to contains only deep when applied to a list.
+ * def cat = 
+  """
+  {
+    name: 'Billie',
+    kittens: [
+      { id: 23, name: 'Bob', bla: [{ b: '1'}] },
+      { id: 42, name: 'Wild' }
+    ]
+  }
+  """
+* def expectedKittens = [{ id: 42, name: 'Wild' }, { id: 23, name: 'Bob', bla: [{ b: '1'}]}]
+* match cat == { name: 'Billie', kittens: '#(^^expectedKittens)' }
+# Bug actually spotted by 2515 ... Below test used to pass when it should not. This is a special case of contains-onlw-deep-does-not-match-item.feature  
+* def partExpectedKittens = [{ id: 42, name: 'Wild' }, { id: 23, name: 'Bob', bla: { b: '1'} }]
+* match cat != { name: 'Billie', kittens: '#(^^partExpectedKittens)' }
+
 Scenario: complex nested arrays
 * def json =
 """
