@@ -21,10 +21,15 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-package com.intuit.karate;
+package com.intuit.karate.matching;
 
+import com.intuit.karate.JsonUtils;
+import com.intuit.karate.StringUtils;
+import com.intuit.karate.XmlUtils;
 import com.intuit.karate.graal.JsEngine;
 import com.intuit.karate.graal.JsValue;
+import com.intuit.karate.matching.FailureCollector.FailureDescriptor;
+
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -43,7 +48,7 @@ import java.util.regex.Pattern;
  *
  * @author pthomas3
  */
-public class MatchOperation {
+public class MatchOperation implements FailureCollector, FailureDescriptor, ExpressionParsingListener {
 
     public static final String REGEX = "regex";        
 
@@ -51,7 +56,7 @@ public class MatchOperation {
     final Match.Type type;
     final Match.Value actual;
     final Match.Value expected;
-    final List<MatchOperation> failures;
+    final List<FailureDescriptor> failures;
     // TODO merge this with Match.Type which should be a complex object not an enum
     final boolean matchEachEmptyAllowed;
 
@@ -91,6 +96,28 @@ public class MatchOperation {
         }        
     }
 
+    @Override
+    public Match.Value getActual(){
+        return actual;
+    }
+
+    @Override
+    public Match.Value getExpected() {
+        return expected;
+    }
+
+
+    @Override
+    public Match.Context getContext() {
+        return context;
+    }
+
+    @Override
+    public String getReason() {
+        return failReason;
+    }
+
+
     private Match.Type fromMatchEach() {
         switch (type) {
             case EACH_CONTAINS:
@@ -121,6 +148,8 @@ public class MatchOperation {
             return each ? Match.Type.EACH_CONTAINS_ANY : Match.Type.CONTAINS_ANY;
         } else if (macro.startsWith("^")) {
             return each ? Match.Type.EACH_CONTAINS : Match.Type.CONTAINS;
+        } else if (macro.startsWith("!^^")) {
+            return each ? Match.Type.EACH_NOT_CONTAINS_ONLY : Match.Type.NOT_CONTAINS_ONLY;            
         } else if (macro.startsWith("!^")) {
             return each ? Match.Type.EACH_NOT_CONTAINS : Match.Type.NOT_CONTAINS;
         } else if (macro.startsWith("!=")) {
@@ -132,6 +161,9 @@ public class MatchOperation {
 
     private static int matchTypeToStartPos(Match.Type mt) {
         switch (mt) {
+            case NOT_CONTAINS_ONLY:
+            case EACH_NOT_CONTAINS_ONLY:
+                return 3;
             case CONTAINS_ONLY:
             case EACH_CONTAINS_ONLY:
             case CONTAINS_DEEP:
@@ -161,7 +193,7 @@ public class MatchOperation {
             case EACH_NOT_EQUALS:
             case EACH_CONTAINS_DEEP:
                 if (actual.isList()) {
-                    List list = actual.getValue();
+                    List<?> list = actual.getValue();
                     if (list.isEmpty() && !matchEachEmptyAllowed) {
                         return fail("match each failed, empty array / list");
                     }
@@ -256,9 +288,63 @@ public class MatchOperation {
         }
     }
 
+    @Override
+    public boolean onEachMacro(String expected) {
+        MatchOperation mo = new MatchOperation(context, Match.Type.EACH_EQUALS, actual, new Match.Value(expected), matchEachEmptyAllowed);
+        mo.execute();
+        return mo.pass ? pass() : fail("all array elements matched");
+    }
+
+    @Override
+    public boolean onShortcut(Match.Type nestedType, Object expected) {
+        if (actual.isList()) { // special case, look for partial maps within list
+            switch (nestedType) {
+                case CONTAINS:
+                    nestedType = Match.Type.CONTAINS_DEEP;
+                    break;
+                case CONTAINS_ONLY:
+                    nestedType = Match.Type.CONTAINS_ONLY_DEEP;
+                    break;
+                case CONTAINS_ANY:
+                    nestedType = Match.Type.CONTAINS_ANY_DEEP;
+                    break;
+            }
+        }                
+        MatchOperation mo = new MatchOperation(context, nestedType, actual, new Match.Value(expected), matchEachEmptyAllowed);
+        return mo.execute();
+    }
+
+    @Override
+    public boolean onFail(String reason) {
+        fail(reason);
+        return false;
+    }
+
+    @Override
+    public boolean onRegularString(String expStr) {
+        String actualStr = actual.getValue();
+        switch (type) {
+            case CONTAINS:
+                return actualStr.contains(expStr);
+            default:
+                return actualStr.equals(expStr);
+        }        
+    }
+        
     private boolean macroEqualsExpected(String expStr) {
+        return processMacro(expStr, actual, context, this);
+    }
+
+    /** Returns whether expStr (which MUST start with #) matches the supplied actual
+    ** expStr may be:
+    ** - a short cut (#(^exp))
+    ** - a regular string which happens to start with # 
+    ** - a js expression
+    */ 
+    // static to make sure only parameters (and no extra fields from MatchOperation) are used.
+    public static boolean processMacro(String expStr, Match.Value actualValue, Match.Context context, ExpressionParsingListener listener) {
         boolean optional = expStr.startsWith("##");
-        if (optional && actual.isNull()) { // exit early
+        if (optional && actualValue.isNull()) { // exit early
             return true;
         }
         int minLength = optional ? 3 : 2;
@@ -269,35 +355,21 @@ public class MatchOperation {
                 Match.Type nestedType = macroToMatchType(false, macro);
                 int startPos = matchTypeToStartPos(nestedType);
                 macro = macro.substring(startPos);
-                if (actual.isList()) { // special case, look for partial maps within list
-                    switch (nestedType) {
-                        case CONTAINS:
-                            nestedType = Match.Type.CONTAINS_DEEP;
-                            break;
-                        case CONTAINS_ONLY:
-                            nestedType = Match.Type.CONTAINS_ONLY_DEEP;
-                            break;
-                        case CONTAINS_ANY:
-                            nestedType = Match.Type.CONTAINS_ANY_DEEP;
-                            break;
-                    }
-                }
                 context.JS.put("$", context.root.actual.getValue());
-                context.JS.put("_", actual.getValue());
-                JsValue jv = context.JS.eval(macro);
+                context.JS.put("_", actualValue.getValue());
+                Object expected = context.JS.eval(macro).getValue();
                 context.JS.bindings.removeMember("$");
                 context.JS.bindings.removeMember("_");
-                MatchOperation mo = new MatchOperation(context, nestedType, actual, new Match.Value(jv.getValue()), matchEachEmptyAllowed);
-                return mo.execute();
+                return listener.onShortcut(nestedType, expected);
             } else if (macro.startsWith("[")) {
                 int closeBracketPos = macro.indexOf(']');
                 if (closeBracketPos != -1) { // array, match each
-                    if (!actual.isList()) {
-                        return fail("actual is not an array");
+                    if (!actualValue.isList()) {
+                        return listener.onFail("actual is not an array");
                     }
                     if (closeBracketPos > 1) {
                         String bracketContents = macro.substring(1, closeBracketPos);
-                        List listAct = actual.getValue();
+                        List<?> listAct = actualValue.getValue();
                         int listSize = listAct.size();
                         context.JS.put("$", context.root.actual.getValue());
                         context.JS.put("_", listSize);
@@ -311,7 +383,7 @@ public class MatchOperation {
                         context.JS.bindings.removeMember("$");
                         context.JS.bindings.removeMember("_");
                         if (!jv.isTrue()) {
-                            return fail("actual array length is " + listSize);
+                            return listener.onFail("actual array length is " + listSize);
                         }
                     }
                     if (macro.length() > closeBracketPos + 1) {
@@ -324,16 +396,13 @@ public class MatchOperation {
                                 macro = "#" + macro;
                             }
                             if (macro.startsWith("#")) {
-                                MatchOperation mo = new MatchOperation(context, Match.Type.EACH_EQUALS, actual, new Match.Value(macro), matchEachEmptyAllowed);
-                                mo.execute();
-                                return mo.pass ? pass() : fail("all array elements matched");
+                                return listener.onEachMacro(macro);
                             } else { // schema reference
                                 Match.Type nestedType = macroToMatchType(true, macro); // match each
                                 int startPos = matchTypeToStartPos(nestedType);
                                 macro = macro.substring(startPos);
-                                JsValue jv = context.JS.eval(macro);
-                                MatchOperation mo = new MatchOperation(context, nestedType, actual, new Match.Value(jv.getValue()), matchEachEmptyAllowed);
-                                return mo.execute();
+                                Object expected = context.JS.eval(macro).getValue();
+                                return listener.onShortcut(nestedType, expected);
                             }
                         }
                     }
@@ -364,48 +433,43 @@ public class MatchOperation {
                         validator = Match.VALIDATORS.get(validatorName);
                     }
                     if (validator != null) {
-                        if (optional && (actual.isNotPresent() || actual.isNull())) {
+                        if (optional && (actualValue.isNotPresent() || actualValue.isNull())) {
                             // pass
-                        } else if (!optional && actual.isNotPresent()) {
+                        } else if (!optional && actualValue.isNotPresent()) {
                             // if the element is not present the expected result can only be
                             // the notpresent keyword, ignored or an optional comparison
-                            return expected.isNotPresent() || "#ignore".contentEquals(expected.getAsString());
+                            Match.Value expectedValue = new Match.Value(expStr);
+                            return expectedValue.isNotPresent() || "#ignore".contentEquals(expectedValue.getAsString());
                         } else {
-                            Match.Result mr = validator.apply(actual);
+                            Match.Result mr = validator.apply(actualValue);
                             if (!mr.pass) {
-                                return fail(mr.message);
+                                return listener.onFail(mr.message);
                             }
                         }
                     } else if (!validatorName.startsWith(REGEX)) { // expected is a string that happens to start with "#"
-                        String actualValue = actual.getValue();
-                        switch (type) {
-                            case CONTAINS:
-                                return actualValue.contains(expStr);
-                            default:
-                                return actualValue.equals(expStr);
-                        }
+                        return listener.onRegularString(expStr);                        
                     }
 
                 }
                 macro = StringUtils.trimToNull(macro);
                 if (macro != null && questionPos != -1) {
                     context.JS.put("$", context.root.actual.getValue());
-                    context.JS.put("_", actual.getValue());
+                    context.JS.put("_", actualValue.getValue());
                     JsValue jv = context.JS.eval(macro);
                     context.JS.bindings.removeMember("$");
                     context.JS.bindings.removeMember("_");
                     if (!jv.isTrue()) {
-                        return fail("evaluated to 'false'");
+                        return listener.onFail("evaluated to 'false'");
                     }
                 }
             }
         }
         return true; // all ok
     }
-    
+
     private static final Pattern UNDERSCORE_PATTERN = Pattern.compile("\\W_\\W|\\W_|_\\W");
 
-    private boolean containsPlaceholderUnderscore(String bracketContents) {
+    private static boolean containsPlaceholderUnderscore(String bracketContents) {
         Matcher m1 = UNDERSCORE_PATTERN.matcher(bracketContents);
         while (m1.find()) {
             return true;
@@ -438,8 +502,8 @@ public class MatchOperation {
                 byte[] expBytes = expected.getValue();
                 return Arrays.equals(actBytes, expBytes);
             case LIST:
-                List actList = actual.getValue();
-                List expList = expected.getValue();
+                List<?> actList = actual.getValue();
+                List<?> expList = expected.getValue();
                 int actListCount = actList.size();
                 int expListCount = expList.size();
                 if (actListCount != expListCount) {
@@ -473,14 +537,14 @@ public class MatchOperation {
     private boolean matchMapValues(Map<String, Object> actMap, Map<String, Object> expMap) { // combined logic for equals and contains
         if (actMap.size() > expMap.size() && (type == Match.Type.EQUALS || type == Match.Type.CONTAINS_ONLY || type == Match.Type.CONTAINS_ONLY_DEEP)) {
             int sizeDiff = actMap.size() - expMap.size();
-            Map<String, Object> diffMap = new LinkedHashMap(actMap);
+            Map<String, Object> diffMap = new LinkedHashMap<>(actMap);
             for (String key : expMap.keySet()) {
                 diffMap.remove(key);
             }
             return fail("actual has " + sizeDiff + " more key(s) than expected - " + JsonUtils.toJson(diffMap));
         }
-        Set<String> unMatchedKeysAct = new LinkedHashSet(actMap.keySet());
-        Set<String> unMatchedKeysExp = new LinkedHashSet(expMap.keySet());
+        Set<String> unMatchedKeysAct = new LinkedHashSet<>(actMap.keySet());
+        Set<String> unMatchedKeysExp = new LinkedHashSet<>(expMap.keySet());
         for (Map.Entry<String, Object> expEntry : expMap.entrySet()) {
             String key = expEntry.getKey();
             Object childExp = expEntry.getValue();
@@ -557,8 +621,8 @@ public class MatchOperation {
                 String expString = expected.getValue();
                 return actString.contains(expString);
             case LIST:
-                List actList = actual.getValue();
-                List expList = expected.getValue();
+                List<?> actList = actual.getValue();
+                List<?> expList = expected.getValue();
                 int actListCount = actList.size();
                 int expListCount = expList.size();               
                 // visited array used to handle duplicates
@@ -654,47 +718,53 @@ public class MatchOperation {
             return false;
         }
         failReason = failReason == null ? reason : reason + " | " + failReason;
-        context.root.failures.add(this);
+        addFailure(this);
         return false;
     }
 
-    String getFailureReasons() {
+    @Override
+    public void addFailure(FailureDescriptor descriptor) {
+        context.root.failures.add(descriptor);
+    }
+
+    @Override
+    public String getFailureReasons() {
         return collectFailureReasons(this);
     }
 
-    private boolean isXmlAttributeOrMap() {
-        return context.xml && actual.isMap()
-                && (context.name.equals("@") || actual.<Map>getValue().containsKey("_"));
+    private static boolean isXmlAttributeOrMap(FailureDescriptor descriptor) {
+        return descriptor.getContext().xml && descriptor.getActual().isMap()
+                && (descriptor.getContext().name.equals("@") || descriptor.getActual().<Map<?, ?>>getValue().containsKey("_"));
     }
 
     private static String collectFailureReasons(MatchOperation root) {
         StringBuilder sb = new StringBuilder();
         sb.append("match failed: ").append(root.type).append('\n');
         Collections.reverse(root.failures);
-        Iterator<MatchOperation> iterator = root.failures.iterator();
-        Set previousPaths = new HashSet();
+        Iterator<FailureDescriptor> iterator = root.failures.iterator();
+        Set<String> previousPaths = new HashSet<>();
         int index = 0;
         int prevDepth = -1;
         while (iterator.hasNext()) {
-            MatchOperation mo = iterator.next();
-            if (previousPaths.contains(mo.context.path) || mo.isXmlAttributeOrMap()) {
+            FailureDescriptor mo = iterator.next();
+            if (previousPaths.contains(mo.getContext().path) || isXmlAttributeOrMap(mo)) {
                 continue;
             }
-            previousPaths.add(mo.context.path);
-            if (mo.context.depth != prevDepth) {
-                prevDepth = mo.context.depth;
+            previousPaths.add(mo.getContext().path);
+            if (mo.getContext().depth != prevDepth) {
+                prevDepth = mo.getContext().depth;
                 index++;
             }
             String prefix = StringUtils.repeat(' ', index * 2);
-            sb.append(prefix).append(mo.context.path).append(" | ").append(mo.failReason);
-            sb.append(" (").append(mo.actual.type).append(':').append(mo.expected.type).append(")");
+            sb.append(prefix).append(mo.getContext().path).append(" | ").append(mo.getReason());
+            sb.append(" (").append(mo.getActual().type).append(':').append(mo.getExpected().type).append(")");
             sb.append('\n');
-            if (mo.context.xml) {
-                sb.append(prefix).append(mo.actual.getAsXmlString()).append('\n');
-                sb.append(prefix).append(mo.expected.getAsXmlString()).append('\n');
+            if (mo.getContext().xml) {
+                sb.append(prefix).append(mo.getActual().getAsXmlString()).append('\n');
+                sb.append(prefix).append(mo.getExpected().getAsXmlString()).append('\n');
             } else {
-                Match.Value expected = mo.expected.getSortedLike(mo.actual);
-                sb.append(prefix).append(mo.actual.getWithinSingleQuotesIfString()).append('\n');
+                Match.Value expected = mo.getExpected().getSortedLike(mo.getActual());
+                sb.append(prefix).append(mo.getActual().getWithinSingleQuotesIfString()).append('\n');
                 sb.append(prefix).append(expected.getWithinSingleQuotesIfString()).append('\n');
             }
             if (iterator.hasNext()) {
