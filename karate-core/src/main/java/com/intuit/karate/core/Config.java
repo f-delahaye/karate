@@ -87,6 +87,7 @@ public class Config {
     private boolean pauseIfNotPerf = false;
     private boolean abortedStepsShouldPass = false;
     private boolean matchEachEmptyAllowed = false;
+    private boolean strictMatch = false;
     private Target driverTarget;
     private Map<String, Map<String, Object>> customOptions = new HashMap();
     private HttpLogModifier logModifier;
@@ -241,6 +242,9 @@ public class Config {
                 return false;
             case "matchEachEmptyAllowed":
                 matchEachEmptyAllowed = value.getValue();
+                return false;
+            case "strictMatch":
+                strictMatch = value.getValue();
                 return false;
             case "continueOnStepFailure":
                 continueOnStepFailureMethods.clear(); // clears previous configuration - in case someone is trying to chain these and forgets resetting the previous one
@@ -636,6 +640,10 @@ public class Config {
         return matchEachEmptyAllowed;
     }        
 
+    public boolean isStrictMatch() {
+        return strictMatch;
+    }
+    
     public boolean isNtlmEnabled() {
         return ntlmEnabled;
     }

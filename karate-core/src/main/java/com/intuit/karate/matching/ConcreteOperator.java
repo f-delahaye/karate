@@ -3,7 +3,13 @@ package com.intuit.karate.matching;
 /** A concrete operator actually defines matchArray/Object ... logics.
  * As opposed to {@link NotOperator} and {@link EachOperator} for example, which are merely wrappers around other Operators.
  */
-public interface ConcreteOperator extends MatchingOperator{
+public abstract class ConcreteOperator implements MatchingOperator{
+
+    private final boolean deep;
+    
+    public ConcreteOperator(boolean deep) {
+        this.deep = deep;
+    }
 
     /**
      * Returns the operator to use for nested matchings.
@@ -18,5 +24,7 @@ public interface ConcreteOperator extends MatchingOperator{
 
      * @return
      */
-    MatchingOperator nestedOperator();
+    protected MatchingOperator nestedOperator(){
+        return deep?this:EqualsOperator.EQUALS;
+    }
 }

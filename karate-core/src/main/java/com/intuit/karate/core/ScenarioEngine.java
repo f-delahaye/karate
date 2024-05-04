@@ -1852,7 +1852,7 @@ public class ScenarioEngine {
     }
 
     public Match.Result match(Match.Type matchType, Object actual, Object expected) {
-        return Match.execute(JS, matchType, actual, expected, config.isMatchEachEmptyAllowed());
+        return Match.execute(JS, matchType, actual, expected, config.isMatchEachEmptyAllowed(), config.isStrictMatch());
     }
 
     private static final Pattern VAR_AND_PATH_PATTERN = Pattern.compile("\\w+");

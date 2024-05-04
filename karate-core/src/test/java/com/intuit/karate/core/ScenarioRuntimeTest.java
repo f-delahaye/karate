@@ -764,7 +764,9 @@ class ScenarioRuntimeTest {
                 "def response1 = { id: '123', name: 'foo' }",
                 "match response1 == schema",
                 "def response2 = { id: '123', name: 'foo', dog: { id: '456', color: 'brown' } }",
-                "match response2 == schema"
+                "match response2 == schema",
+                "def response3 = { id: '123', name: 'foo', dog: { id: '456'} }",
+                "match response3 != schema"
         );
     }
 

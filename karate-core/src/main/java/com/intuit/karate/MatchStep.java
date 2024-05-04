@@ -150,15 +150,27 @@ public class MatchStep {
             return not ? Match.Type.EACH_NOT_EQUALS : Match.Type.EACH_EQUALS;
         }
         if (contains) {
-            if (only) {
-                return deep ? Match.Type.CONTAINS_ONLY_DEEP : Match.Type.CONTAINS_ONLY;
+            if (only) {                
+                if (deep) {
+                    return not? Match.Type.NOT_CONTAINS_ONLY_DEEP : Match.Type.CONTAINS_ONLY_DEEP; 
+                }  
+                if (not) {
+                    return Match.Type.NOT_CONTAINS_ONLY;
+                }
+                return Match.Type.CONTAINS_ONLY;
             }
             if (any) {
+                if (deep) {
+                    return not? Match.Type.NOT_CONTAINS_ANY_DEEP : Match.Type.CONTAINS_ANY_DEEP;
+                }
+                if (not) {
+                    return Match.Type.NOT_CONTAINS_ANY;
+                }
                 return Match.Type.CONTAINS_ANY;
             }
             if (deep) {
                 if (not) {
-                    throw new RuntimeException("'!contains deep' is not yet supported, use 'contains deep' instead");
+                    return Match.Type.NOT_CONTAINS_DEEP;
                 }
                 return Match.Type.CONTAINS_DEEP;
             }

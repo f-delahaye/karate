@@ -21,13 +21,17 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-package com.intuit.karate.matching;
+package com.intuit.karate;
 
-import com.intuit.karate.Json;
-import com.intuit.karate.JsonUtils;
-import com.intuit.karate.StringUtils;
-import com.intuit.karate.XmlUtils;
 import com.intuit.karate.graal.JsEngine;
+import com.intuit.karate.matching.ContainsAnyOperator;
+import com.intuit.karate.matching.ContainsOnlyOperator;
+import com.intuit.karate.matching.ContainsOperator;
+import com.intuit.karate.matching.EqualsOperator;
+import com.intuit.karate.matching.Failures;
+import com.intuit.karate.matching.MatchingOperation;
+import com.intuit.karate.matching.MatchingOperator;
+
 import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -56,20 +60,22 @@ public class Match {
         NOT_CONTAINS(ContainsOperator.NOT_CONTAINS),
         CONTAINS_ONLY(ContainsOnlyOperator.CONTAINS_ONLY),
         NOT_CONTAINS_ONLY(ContainsOnlyOperator.NOT_CONTAINS_ONLY),
-        CONTAINS_ANY(null),
+        CONTAINS_ANY(ContainsAnyOperator.CONTAINS_ANY),
+        NOT_CONTAINS_ANY(ContainsAnyOperator.NOT_CONTAINS_ANY),
         CONTAINS_DEEP(ContainsOperator.CONTAINS_DEEP),
         NOT_CONTAINS_DEEP(ContainsOperator.NOT_CONTAINS_DEEP),
         CONTAINS_ONLY_DEEP(ContainsOnlyOperator.CONTAINS_ONLY_DEEP),
-        CONTAINS_ANY_DEEP(null),
+        NOT_CONTAINS_ONLY_DEEP(ContainsOnlyOperator.NOT_CONTAINS_ONLY_DEEP),
+        CONTAINS_ANY_DEEP(ContainsAnyOperator.CONTAINS_ANY_DEEP),
+        NOT_CONTAINS_ANY_DEEP(ContainsAnyOperator.NOT_CONTAINS_ANY_DEEP),
         EACH_EQUALS(EqualsOperator.EACH_EQUALS),
         EACH_NOT_EQUALS(EqualsOperator.EACH_NOT_EQUALS),
         EACH_CONTAINS(ContainsOperator.EACH_CONTAINS),
         EACH_NOT_CONTAINS(ContainsOperator.EACH_NOT_CONTAINS),
         EACH_NOT_CONTAINS_ONLY(ContainsOnlyOperator.EACH_NOT_CONTAINS_ONLY),
         EACH_CONTAINS_ONLY(ContainsOnlyOperator.EACH_CONTAINS_ONLY),
-        EACH_CONTAINS_ANY(null),
+        EACH_CONTAINS_ANY(ContainsAnyOperator.EACH_CONTAINS_ANY),
         EACH_CONTAINS_DEEP(ContainsOperator.EACH_CONTAINS_DEEP);
-
 
         MatchingOperator operator;
         
@@ -163,7 +169,7 @@ public class Match {
 
     }
 
-    static class Context {
+    public static class Context {
 
         final JsEngine JS;
         final MatchOperation root;
@@ -185,7 +191,7 @@ public class Match {
             this.matchEachEmptyAllowed = matchEachEmptyAllowed;
         }
 
-        Context descend(String name) {
+        public Context descend(String name) {
             if (xml) {
                 String childPath = path.endsWith("/@") ? path + name : (depth == 0 ? "" : path) + "/" + name;
                 return new Context(JS, root, xml, depth + 1, childPath, name, -1, matchEachEmptyAllowed);
@@ -196,12 +202,24 @@ public class Match {
             }
         }
 
-        Context descend(int index) {
+        public Context descend(int index) {
             if (xml) {
                 return new Context(JS, root, xml, depth + 1, path + "[" + (index + 1) + "]", name, index, matchEachEmptyAllowed);
             } else {
                 return new Context(JS, root, xml, depth + 1, path + "[" + index + "]", name, index, matchEachEmptyAllowed);
             }
+        }
+
+        public String path() {
+            return path;
+        }
+
+        public void putJS(String key, Object value) {
+            JS.put(key, value);
+        }
+
+        public void removeJS(String key) {
+            JS.bindings.removeMember(key);
         }
 
     }
@@ -225,7 +243,7 @@ public class Match {
 
         private final Object value;
 
-        Value(Object value) {
+        public Value(Object value) {
             this(value, false);
         }
 
@@ -458,19 +476,23 @@ public class Match {
 
     }
 
-    public static Result execute(JsEngine js, Type matchType, Object actual, Object expected, boolean matchEachEmptyAllowed) {
+    public static Result execute(JsEngine js, Type matchType, Object actual, Object expected, boolean matchEachEmptyAllowed, boolean strictMatch) {
         MatchOperation mo = new MatchOperation(js, matchType, new Value(actual), new Value(expected), matchEachEmptyAllowed);
 
         boolean match;
-        if (true) {
-            match = new MatchHandler().matches(expected, matchType.operator(), actual, mo, mo.context);
+        String failureReason;
+        if (strictMatch) {
+            Failures failureCollector = new Failures(matchType);
+            match = MatchingOperation.of(actual, expected, mo.context, matchType.operator, failureCollector).execute();
+            failureReason = failureCollector.getFailureReasons();
         } else {
             match = mo.execute();
+            failureReason = mo.getFailureReasons();
         }
         if (match) {
             return PASS;
         } else {
-            return fail(mo.getFailureReasons());
+            return fail(failureReason);
         }
     }
 

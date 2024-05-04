@@ -3,13 +3,15 @@ package com.intuit.karate.matching;
 import java.util.List;
 import java.util.Map;
 
-import com.intuit.karate.matching.Match.Context;
-
 /**
  * Operator for match contains.
  * 
+ * This class is final by designed.
+ * It is tempting to make e.g. ContainsOnly extend Contains. But some methods' implementation are specific to contain and not suitable for the other contain* operators,  
+ * 
+ * Instead, when logic is application to multiple contain operators, it should be exposed as a static method.
  */
-public class ContainsOperator implements ConcreteOperator {
+public final class ContainsOperator extends ConcreteOperator {
 
     public static final MatchingOperator CONTAINS = new ContainsOperator(false);
     public static final MatchingOperator CONTAINS_DEEP = new ContainsOperator(true);
@@ -19,15 +21,8 @@ public class ContainsOperator implements ConcreteOperator {
     public static final MatchingOperator EACH_NOT_CONTAINS = new EachOperator(NOT_CONTAINS);
     public static final MatchingOperator EACH_CONTAINS_DEEP = new EachOperator(CONTAINS_DEEP);
 
-    final boolean deep;
-
 	public ContainsOperator(boolean deep) {
-		this.deep = deep;
-	}
-
-	@Override
-	public MatchingOperator nestedOperator() {
-        return deep?this:EqualsOperator.EQUALS;
+		super(deep);
 	}
 
     /**
@@ -39,68 +34,98 @@ public class ContainsOperator implements ConcreteOperator {
      *   
      */
 	@Override
-	public boolean matchLiteral(Object expected, Object actual, FailureCollector collector, Context context) {
-        if (actual instanceof Iterable actualIterable) {
-            return contains(actualIterable, expected, nestedOperator(), collector, context);
-        } else {
-            return ConcreteOperator.super.matchLiteral(expected, actual, collector, context);
+	public boolean matchLiteral(Object actualLiteral, Object expected, MatchingOperation operation) {
+        if (actualLiteral instanceof String actualStr) {
+            if (expected instanceof CharSequence expectedStr) {
+                if (actualStr.contains(expectedStr)) {
+                    return true;
+                }               
+                return operation.fail("actual does not contain expected");
+            } 
+             // String contains Integer for example (although that particular case could be implemented, actually)
+            return operation.fail("data types don't match");
         }
+        return EqualsOperator.EQUALS.matchLiteral(actualLiteral, expected, operation);
 	}
 
     @Override
-    public boolean matchArray(List<?> expectedList, Object actual, FailureCollector collector, Context context) {
-        if (actual instanceof List<?> actualList) {
-            return matchArrays(expectedList, actualList, collector, context);
+    public boolean matchList(List<?> actualList, Object expected, MatchingOperation operation) {        
+        if (expected instanceof List<?> expectedList) {
+            return actualListContainsExpectedList(actualList, expectedList, operation, nestedOperator(), "not contains");
+        }
+        
+        // else expected is a single item, checking whether it is contained in actualList
+        for (int i=0; i<actualList.size();i++) {
+            Object actual = actualList.get(i);
+            if (MatchingOperation.of(actual, expected, operation.context.descend(i), nestedOperator(), operation.failures).execute()) {
+                return true;
+            }
         } 
-        return false;
+
+        return operation.fail("actual does not contain item");
     }
 
-    protected boolean matchArrays(List<?> expectedList, List<?> actualList, FailureCollector collector, Context context) {
-        MatchingOperator operator = nestedOperator();        
-        for (Object expected: expectedList) {
-            if (!contains(actualList, expected, operator, collector, context)) {
-                return false;
+    static boolean actualListContainsExpectedList(List<?> actualList, List<?> expectedList, MatchingOperation operation, MatchingOperator operator, String failureMessage) {
+        for (int i=0; i<expectedList.size(); i++) {
+            Object expectedItem = expectedList.get(i);
+            if (!actualListContainsItem(actualList, expectedItem, operation, operator)) {
+                return operation.fail(failureMessage + " | actual does not match expected");
             }
         }
         return true;
 
     }
 
+
     /** Returns true if any element of actualList matches (per the provided operator) the provided expected  */
-    private boolean contains(Iterable<?> actualList, Object expected, MatchingOperator operator, FailureCollector collector, Context context) {
-        for (Object actual: actualList) {
-            if (new MatchHandler().matches(expected, operator, actual, collector, context)) {
+    static boolean actualListContainsItem(List<?> actualList, Object expectedItem, MatchingOperation operation, MatchingOperator operator) {
+        for (int i=0;i<actualList.size();i++) {
+            Object actual = actualList.get(i);
+            MatchingOperation childOperation = MatchingOperation.of(actual, expectedItem, operation.context.descend(i), operator, operation.failures);
+            if (childOperation.execute()) {
                 return true;
             }
         }
         return false;
     }
 
-
 	@Override
-	public boolean matchObject(Map<String, ?> expectedObject, Object actual, FailureCollector collector, Context context) {
-        if (actual instanceof Map actualObject) {
-            return matchObjects(expectedObject, actualObject, collector, context);
+	public boolean matchObject(Map<String, ?> actualObject, Object expected, MatchingOperation operation) {
+        if (expected instanceof Map expectedObject) {
+            return actualObjectContainsExpectedObject(actualObject, expectedObject, operation, nestedOperator(), "not contains");
         }
-        return false;
+        return operation.fail("types don't match");
 	}
 
-    protected boolean matchObjects(Map<String, ?> expectedObject, Map<String, ?> actualObject, FailureCollector collector, Context context) {
-        return contains(expectedObject, actualObject, nestedOperator(), collector, context);        
-    }
-
-    protected static boolean contains(Map<String, ?> expectedObject, Map<String, ?> actualObject, MatchingOperator operator, FailureCollector collector, Context context) {
+    static boolean actualObjectContainsExpectedObject(Map<String, ?> actualObject, Map<String, ?> expectedObject, MatchingOperation operation, MatchingOperator operator, String failureReason) {
         for (Map.Entry<String, ?> expected: expectedObject.entrySet()) {
+            String expectedKey = expected.getKey();
             Object expectedValue = expected.getValue();
-            Object actualValue = actualObject.get(expected.getKey());
-            if (actualValue == null || !new MatchHandler().matches(expectedValue, operator, actualValue, collector, context)) {
-                return false;
+            // If key is not present, do not fail if it is optional.
+            // However, if it is present, do validate it, even if it's optional.
+            // Note that "key not present", from a Karate perspective, is not exactly the same as "value is null".
+            // The former is handled here, the latter will be in Match.VALIDATORS.
+            // See js-arrays.feature lines 253 vs 269            
+            if (!actualObject.containsKey(expectedKey)) {
+                if (isOptionalKey(expectedValue)) {
+                    return true;
+                }
+                return operation.fail("actual does not contain key "+expectedKey);
             }
+            MatchingOperation childOperation = MatchingOperation.of(actualObject.get(expectedKey), expectedValue, operation.context.descend(expected.getKey()), operator, operation.failures);
+            if (!childOperation.execute()) {
+                return operation.fail(failureReason + " | match failed for name: " +expectedKey);
+            }            
         }
         return true;
     }
 
+    static boolean isOptionalKey(Object value) {
+        return value instanceof String valueStr && (valueStr.startsWith("##") || valueStr.equals("#ignore") || valueStr.equals("#notpresent"));
+    }
 
-    
-
-}
+    public boolean matchMacro(Object actual, String macro, MatchingOperation operation) {
+        // per doc, macro forces equals. Not sure if we should throw unsupportedOperation, or delegate to equals.
+        return EqualsOperator.EQUALS.matchMacro(actual, macro, operation);
+    }
+ }
