@@ -181,3 +181,70 @@ Scenario: various ways of checking that a string ends with a number
 * assert foo.startsWith('hello')
 * def isHello = function(s){ return s.startsWith('hello') && karate.match(s, '#regex .+[0-9]+').pass }
 * match foo == '#? isHello(_)'
+
+
+  Scenario: issue #2516
+* def phx =
+ """
+ {
+     "name": "Phoenix (All)",
+     "city_code": "PHX",
+     "airports": {
+         "SCF": {
+             "name": "Scottsdale Municipal",
+         },
+         "PHX": {
+             "name": "Sky Harbor International",
+         }
+     }
+ }
+ """
+
+* def aus =
+ """
+ {
+     "name": "Austin (All)",
+     "city_code": "AUS",
+     "airports": {
+         "AUS": {
+             "name": "Austin–Bergstrom"
+         }
+     }
+ }
+ """
+
+* def phx_aus_map =
+ """ {
+         "PHX": #(phx),
+         "AUS": #(aus)
+ }
+ """
+
+* def phx_aus_list = [#(phx), #(aus)]
+
+* def name_schema = {name: #string}
+* def code_schema = {code: #string}
+
+* match each phx_aus_map contains {name: #string}
+* match each phx_aus_map !contains {code: #string}
+* match each phx_aus_list contains {name: #string}
+
+ # works with shortcuts too
+
+
+* match phx_aus_map == '#[] ^name_schema'
+* match phx_aus_map == '#[] !^code_schema'
+* match phx_aus_list == '#[] ^name_schema'
+* match phx_aus_list == '#[] !^code_schema'
+
+* def multi_level_name_schema = {name: #string, airports: #[] ^name_schema}
+* match phx_aus_map == '#[] ^multi_level_name_schema'
+* match phx_aus_map == '#[] ^+multi_level_name_schema'
+* match phx_aus_list == '#[] ^multi_level_name_schema'
+
+* def multi_level_schema = {name: #string, city_code: #string, airports: #[] name_schema}
+* match phx_aus_map == '#[] multi_level_schema'
+* match phx_aus_list == '#[] multi_level_schema'
+
+ #    each match only applies only at depth > 1 (airports) and not at the root
+* match phx == '#(multi_level_schema)'
