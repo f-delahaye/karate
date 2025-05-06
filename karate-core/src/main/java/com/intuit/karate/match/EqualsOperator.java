@@ -9,7 +9,7 @@ import static com.intuit.karate.match.MatchOperation.toBigDecimal;
 
 public class EqualsOperator extends AbstractOperator {
 
-    protected EqualsOperator(boolean matchEachEmptyAllowed) {
+    public EqualsOperator(boolean matchEachEmptyAllowed) {
         super(matchEachEmptyAllowed);
     }
 

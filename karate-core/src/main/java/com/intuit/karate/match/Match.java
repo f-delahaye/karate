@@ -26,6 +26,7 @@ package com.intuit.karate.match;
 import com.intuit.karate.Json;
 import com.intuit.karate.JsonUtils;
 import com.intuit.karate.StringUtils;
+import com.intuit.karate.Match.Type;
 import com.intuit.karate.XmlUtils;
 import com.intuit.karate.graal.JsEngine;
 import java.lang.reflect.Array;
@@ -48,72 +49,9 @@ import org.w3c.dom.Node;
  */
 public class Match {
 
-    public static enum Type {
+    protected static final Result PASS = new Result(true, null);
 
-        EQUALS,
-        NOT_EQUALS,
-        CONTAINS,
-        NOT_CONTAINS,
-        CONTAINS_ONLY,
-        NOT_CONTAINS_ONLY,
-        CONTAINS_ANY,
-        NOT_CONTAINS_ANY,
-        CONTAINS_DEEP,
-        NOT_CONTAINS_DEEP,
-        CONTAINS_ONLY_DEEP,
-        NOT_CONTAINS_ONLY_DEEP,
-        CONTAINS_ANY_DEEP,
-        NOT_CONTAINS_ANY_DEEP,
-        EACH_EQUALS,
-        EACH_NOT_EQUALS,
-        EACH_CONTAINS,
-        EACH_NOT_CONTAINS,
-        EACH_NOT_CONTAINS_ONLY,
-        EACH_CONTAINS_ONLY,
-        EACH_CONTAINS_ANY,
-        EACH_CONTAINS_DEEP;
-
-        private boolean isEach() {
-            return name().startsWith("EACH");
-        }
-
-        private boolean isContains() {
-            return name().contains("CONTAINS");
-        }
-
-        private boolean isAny() {
-            return name().contains("ANY");
-        }
-
-        private boolean isOnly() {
-            return name().contains("ONLY");
-        }
-
-        private boolean isDeep() {
-            return name().endsWith("DEEP");
-        }
-
-        private boolean isNot() {
-            return name().contains("NOT_");
-        }
-
-        public Operator operator(boolean matchEachEmptyAllowed) {
-            EqualsOperator equalsOperator = new EqualsOperator(matchEachEmptyAllowed);
-            Operator operator = isContains()? new ContainsOperator(isAny(), isOnly(), isDeep(), equalsOperator) : equalsOperator;
-            if (isNot()) {
-                boolean strictContains = isContains() && !isAny()&&!isOnly();
-                operator =  new NotOperator(operator, strictContains);
-            }
-            if (isEach()) {
-                operator = new EachOperator(matchEachEmptyAllowed, operator);
-            }
-            return operator;
-        }
-    }
-
-    static final Result PASS = new Result(true, null);
-
-    static Result fail(String message) {
+    protected static Result fail(String message) {
         return new Result(false, message);
     }
 
@@ -168,27 +106,12 @@ public class Match {
         });
     }
 
-    public static class Result {
+    public static class Result extends com.intuit.karate.Match.Result{
 
-        public final String message;
-        public final boolean pass;
-
-        private Result(boolean pass, String message) {
-            this.pass = pass;
-            this.message = message;
+        Result(boolean pass, String message) {
+            super(pass, message);
         }
 
-        @Override
-        public String toString() {
-            return pass ? "[pass]" : message;
-        }
-
-        public Map<String, Object> toMap() {
-            Map<String, Object> map = new HashMap(2);
-            map.put("pass", pass);
-            map.put("message", message);
-            return map;
-        }
 
     }
 
@@ -253,11 +176,11 @@ public class Match {
 
         private final Object value;
 
-        Value(Object value) {
+        protected Value(Object value) {
             this(value, false);
         }
 
-        Value(Object value, boolean exceptionOnMatchFailure) {
+        protected Value(Object value, boolean exceptionOnMatchFailure) {
             if (value instanceof Set) {
                 value = new ArrayList((Set) value);
             } else if (value != null && value.getClass().isArray()) {
@@ -409,7 +332,7 @@ public class Match {
             return sb.toString();
         }
 
-        public Result is(Type matchType, Object expected) {
+        public Result is(com.intuit.karate.Match.Type matchType, Object expected) {
             LegacyMatchOperation mo = new ExecutableMatchOperation((Context)null, matchType, this, new Value(parseIfJsonOrXmlString(expected), exceptionOnMatchFailure), false);
             mo.execute();
             if (mo.pass) {
@@ -425,7 +348,7 @@ public class Match {
         //======================================================================
         //
         public Result isEqualTo(Object expected) {
-            return is(Type.EQUALS, expected);
+            return is(com.intuit.karate.Match.Type.EQUALS, expected);
         }
 
         public Result contains(Object expected) {
@@ -457,7 +380,7 @@ public class Match {
         }
 
         public Result isEachEqualTo(Object expected) {
-            return is(Type.EACH_EQUALS, expected);
+            return is(com.intuit.karate.Match.Type.EACH_EQUALS, expected);
         }
 
         public Result isEachNotEqualTo(Object expected) {

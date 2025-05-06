@@ -39,6 +39,8 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.intuit.karate.Match.Type.*;
+
 /**
  *
  * @author pthomas3
@@ -50,63 +52,63 @@ public class LegacyMatchOperation extends MatchOperation {
     // TODO merge this with Match.Type which should be a complex object not an enum
     final boolean matchEachEmptyAllowed;
 
-    LegacyMatchOperation(Match.Type type, Match.Value actual, Match.Value expected, boolean matchEachEmptyAllowed) {
+    LegacyMatchOperation(com.intuit.karate.Match.Type type, Match.Value actual, Match.Value expected, boolean matchEachEmptyAllowed) {
         this(JsEngine.global(), null, type, actual, expected, matchEachEmptyAllowed);
     }
 
-    LegacyMatchOperation(JsEngine js, Match.Type type, Match.Value actual, Match.Value expected, boolean matchEachEmptyAllowed) {
+    LegacyMatchOperation(JsEngine js, com.intuit.karate.Match.Type type, Match.Value actual, Match.Value expected, boolean matchEachEmptyAllowed) {
         this(js, null, type, actual, expected, matchEachEmptyAllowed);
     }
 
-    LegacyMatchOperation(Match.Context context, Match.Type type, Match.Value actual, Match.Value expected, boolean matchEachEmptyAllowed) {
+    LegacyMatchOperation(Match.Context context, com.intuit.karate.Match.Type type, Match.Value actual, Match.Value expected, boolean matchEachEmptyAllowed) {
         this(null, context, type, actual, expected, matchEachEmptyAllowed);
     }
 
-    private LegacyMatchOperation(JsEngine js, Match.Context context, Match.Type type, Match.Value actual, Match.Value expected, boolean matchEachEmptyAllowed) {
+    private LegacyMatchOperation(JsEngine js, Match.Context context, com.intuit.karate.Match.Type type, Match.Value actual, Match.Value expected, boolean matchEachEmptyAllowed) {
         super(type, actual, expected, context, js);
         this.matchEachEmptyAllowed = matchEachEmptyAllowed;
     }
 
-    private Match.Type fromMatchEach() {
+    private com.intuit.karate.Match.Type fromMatchEach() {
         switch (type) {
             case EACH_CONTAINS:
-                return Match.Type.CONTAINS;
+                return com.intuit.karate.Match.Type.CONTAINS;
             case EACH_NOT_CONTAINS:
-                return Match.Type.NOT_CONTAINS;
+                return com.intuit.karate.Match.Type.NOT_CONTAINS;
             case EACH_CONTAINS_ONLY:
-                return Match.Type.CONTAINS_ONLY;
+                return com.intuit.karate.Match.Type.CONTAINS_ONLY;
             case EACH_CONTAINS_ANY:
-                return Match.Type.CONTAINS_ANY;
+                return com.intuit.karate.Match.Type.CONTAINS_ANY;
             case EACH_EQUALS:
-                return Match.Type.EQUALS;
+                return com.intuit.karate.Match.Type.EQUALS;
             case EACH_NOT_EQUALS:
-                return Match.Type.NOT_EQUALS;
+                return com.intuit.karate.Match.Type.NOT_EQUALS;
             case EACH_CONTAINS_DEEP:
-                return Match.Type.CONTAINS_DEEP;
+                return com.intuit.karate.Match.Type.CONTAINS_DEEP;
             default:
                 throw new RuntimeException("unexpected outer match type: " + type);
         }
     }
 
-    protected static Match.Type macroToMatchType(boolean each, String macro) {
+    protected static com.intuit.karate.Match.Type macroToMatchType(boolean each, String macro) {
         if (macro.startsWith("^^")) {
-            return each ? Match.Type.EACH_CONTAINS_ONLY : Match.Type.CONTAINS_ONLY;
+            return each ? com.intuit.karate.Match.Type.EACH_CONTAINS_ONLY : com.intuit.karate.Match.Type.CONTAINS_ONLY;
         } else if (macro.startsWith("^+")) {
-            return each ? Match.Type.EACH_CONTAINS_DEEP : Match.Type.CONTAINS_DEEP;
+            return each ? com.intuit.karate.Match.Type.EACH_CONTAINS_DEEP : com.intuit.karate.Match.Type.CONTAINS_DEEP;
         } else if (macro.startsWith("^*")) {
-            return each ? Match.Type.EACH_CONTAINS_ANY : Match.Type.CONTAINS_ANY;
+            return each ? com.intuit.karate.Match.Type.EACH_CONTAINS_ANY : com.intuit.karate.Match.Type.CONTAINS_ANY;
         } else if (macro.startsWith("^")) {
-            return each ? Match.Type.EACH_CONTAINS : Match.Type.CONTAINS;
+            return each ? com.intuit.karate.Match.Type.EACH_CONTAINS : com.intuit.karate.Match.Type.CONTAINS;
         } else if (macro.startsWith("!^")) {
-            return each ? Match.Type.EACH_NOT_CONTAINS : Match.Type.NOT_CONTAINS;
+            return each ? com.intuit.karate.Match.Type.EACH_NOT_CONTAINS : com.intuit.karate.Match.Type.NOT_CONTAINS;
         } else if (macro.startsWith("!=")) {
-            return each ? Match.Type.EACH_NOT_EQUALS : Match.Type.NOT_EQUALS;
+            return each ? com.intuit.karate.Match.Type.EACH_NOT_EQUALS : com.intuit.karate.Match.Type.NOT_EQUALS;
         } else {
-            return each ? Match.Type.EACH_EQUALS : Match.Type.EQUALS;
+            return each ? com.intuit.karate.Match.Type.EACH_EQUALS : com.intuit.karate.Match.Type.EQUALS;
         }
     }
 
-    protected static int matchTypeToStartPos(Match.Type mt) {
+    protected static int matchTypeToStartPos(com.intuit.karate.Match.Type mt) {
         switch (mt) {
             case CONTAINS_ONLY:
             case EACH_CONTAINS_ONLY:
@@ -141,7 +143,7 @@ public class LegacyMatchOperation extends MatchOperation {
                     if (list.isEmpty() && !matchEachEmptyAllowed) {
                         return fail("match each failed, empty array / list");
                     }
-                    Match.Type nestedMatchType = fromMatchEach();                    
+                    com.intuit.karate.Match.Type nestedMatchType = fromMatchEach();
                     int count = list.size();
                     for (int i = 0; i < count; i++) {
                         Object o = list.get(i);
@@ -194,10 +196,10 @@ public class LegacyMatchOperation extends MatchOperation {
             if (expected.isString()) {
                 String expStr = expected.getValue();
                 if (!expStr.startsWith("#")) { // edge case if rhs is macro
-                    return type == Match.Type.NOT_EQUALS ? pass() : fail("data types don't match");
+                    return type == com.intuit.karate.Match.Type.NOT_EQUALS ? pass() : fail("data types don't match");
                 }
             } else {
-                return type == Match.Type.NOT_EQUALS ? pass() : fail("data types don't match");
+                return type == com.intuit.karate.Match.Type.NOT_EQUALS ? pass() : fail("data types don't match");
             }
         }
         if (expected.isString()) {
@@ -242,19 +244,19 @@ public class LegacyMatchOperation extends MatchOperation {
             String macro = expStr.substring(minLength - 1);
             if (macro.startsWith("(") && macro.endsWith(")")) {
                 macro = macro.substring(1, macro.length() - 1);
-                Match.Type nestedType = macroToMatchType(false, macro);
+                com.intuit.karate.Match.Type nestedType = macroToMatchType(false, macro);
                 int startPos = matchTypeToStartPos(nestedType);
                 macro = macro.substring(startPos);
                 if (actual.isList()) { // special case, look for partial maps within list
                     switch (nestedType) {
                         case CONTAINS:
-                            nestedType = Match.Type.CONTAINS_DEEP;
+                            nestedType = com.intuit.karate.Match.Type.CONTAINS_DEEP;
                             break;
                         case CONTAINS_ONLY:
-                            nestedType = Match.Type.CONTAINS_ONLY_DEEP;
+                            nestedType = com.intuit.karate.Match.Type.CONTAINS_ONLY_DEEP;
                             break;
                         case CONTAINS_ANY:
-                            nestedType = Match.Type.CONTAINS_ANY_DEEP;
+                            nestedType = com.intuit.karate.Match.Type.CONTAINS_ANY_DEEP;
                             break;
                     }
                 }
@@ -300,11 +302,11 @@ public class LegacyMatchOperation extends MatchOperation {
                                 macro = "#" + macro;
                             }
                             if (macro.startsWith("#")) {
-                                LegacyMatchOperation mo = new LegacyMatchOperation(context, Match.Type.EACH_EQUALS, actual, new Match.Value(macro), matchEachEmptyAllowed);
+                                LegacyMatchOperation mo = new LegacyMatchOperation(context, com.intuit.karate.Match.Type.EACH_EQUALS, actual, new Match.Value(macro), matchEachEmptyAllowed);
                                 mo.execute();
                                 return mo.pass ? pass() : fail("all array elements matched");
                             } else { // schema reference
-                                Match.Type nestedType = macroToMatchType(true, macro); // match each
+                                com.intuit.karate.Match.Type nestedType = macroToMatchType(true, macro); // match each
                                 int startPos = matchTypeToStartPos(nestedType);
                                 macro = macro.substring(startPos);
                                 JsValue jv = context.JS.eval(macro);
@@ -424,7 +426,7 @@ public class LegacyMatchOperation extends MatchOperation {
                 for (int i = 0; i < actListCount; i++) {
                     Match.Value actListValue = new Match.Value(actList.get(i));
                     Match.Value expListValue = new Match.Value(expList.get(i));
-                    LegacyMatchOperation mo = new LegacyMatchOperation(context.descend(i), Match.Type.EQUALS, actListValue, expListValue, matchEachEmptyAllowed);
+                    LegacyMatchOperation mo = new LegacyMatchOperation(context.descend(i), com.intuit.karate.Match.Type.EQUALS, actListValue, expListValue, matchEachEmptyAllowed);
                     mo.execute();
                     if (!mo.pass) {
                         return fail("array match failed at index " + i);
@@ -447,7 +449,7 @@ public class LegacyMatchOperation extends MatchOperation {
     }
 
     private boolean matchMapValues(Map<String, Object> actMap, Map<String, Object> expMap) { // combined logic for equals and contains
-        if (actMap.size() > expMap.size() && (type == Match.Type.EQUALS || type == Match.Type.CONTAINS_ONLY || type == Match.Type.CONTAINS_ONLY_DEEP)) {
+        if (actMap.size() > expMap.size() && (type == com.intuit.karate.Match.Type.EQUALS || type == com.intuit.karate.Match.Type.CONTAINS_ONLY || type == com.intuit.karate.Match.Type.CONTAINS_ONLY_DEEP)) {
             int sizeDiff = actMap.size() - expMap.size();
             Map<String, Object> diffMap = new LinkedHashMap(actMap);
             for (String key : expMap.keySet()) {
@@ -464,56 +466,56 @@ public class LegacyMatchOperation extends MatchOperation {
                 if (childExp instanceof String) {
                     String childString = (String) childExp;
                     if (childString.startsWith("##") || childString.equals("#ignore") || childString.equals("#notpresent")) {
-                        if (type == Match.Type.CONTAINS_ANY || type == Match.Type.CONTAINS_ANY_DEEP) {
+                        if (type == com.intuit.karate.Match.Type.CONTAINS_ANY || type == com.intuit.karate.Match.Type.CONTAINS_ANY_DEEP) {
                             return true; // exit early
                         }
                         unMatchedKeysExp.remove(key);
                         if (unMatchedKeysExp.isEmpty()) {
-                            if (type == Match.Type.CONTAINS || type == Match.Type.CONTAINS_DEEP) {
+                            if (type == com.intuit.karate.Match.Type.CONTAINS || type == com.intuit.karate.Match.Type.CONTAINS_DEEP) {
                                 return true; // all expected keys matched
                             }
                         }
                         continue;
                     }
                 }
-                if (type != Match.Type.CONTAINS_ANY && type != Match.Type.CONTAINS_ANY_DEEP) {
+                if (type != com.intuit.karate.Match.Type.CONTAINS_ANY && type != com.intuit.karate.Match.Type.CONTAINS_ANY_DEEP) {
                     return fail("actual does not contain key - '" + key + "'");
                 }
             }
             Match.Value childActValue = new Match.Value(actMap.get(key));
-            Match.Type childMatchType;
-            if (type == Match.Type.CONTAINS_DEEP) {
-                childMatchType = childActValue.isMapOrListOrXml() ? Match.Type.CONTAINS_DEEP : Match.Type.EQUALS;
-            } else if (type == Match.Type.CONTAINS_ONLY_DEEP) {
-                childMatchType = childActValue.isMapOrListOrXml() ? Match.Type.CONTAINS_ONLY_DEEP : Match.Type.EQUALS;
+            com.intuit.karate.Match.Type childMatchType;
+            if (type == com.intuit.karate.Match.Type.CONTAINS_DEEP) {
+                childMatchType = childActValue.isMapOrListOrXml() ? com.intuit.karate.Match.Type.CONTAINS_DEEP : com.intuit.karate.Match.Type.EQUALS;
+            } else if (type == com.intuit.karate.Match.Type.CONTAINS_ONLY_DEEP) {
+                childMatchType = childActValue.isMapOrListOrXml() ? com.intuit.karate.Match.Type.CONTAINS_ONLY_DEEP : com.intuit.karate.Match.Type.EQUALS;
             } else {
-                childMatchType = Match.Type.EQUALS;
+                childMatchType = com.intuit.karate.Match.Type.EQUALS;
             }
             LegacyMatchOperation mo = new LegacyMatchOperation(context.descend(key), childMatchType, childActValue, new Match.Value(childExp), matchEachEmptyAllowed);
             mo.execute();
             if (mo.pass) {
-                if (type == Match.Type.CONTAINS_ANY || type == Match.Type.CONTAINS_ANY_DEEP) {
+                if (type == com.intuit.karate.Match.Type.CONTAINS_ANY || type == com.intuit.karate.Match.Type.CONTAINS_ANY_DEEP) {
                     return true; // exit early
                 }
                 unMatchedKeysExp.remove(key);
                 if (unMatchedKeysExp.isEmpty()) {
-                    if (type == Match.Type.CONTAINS || type == Match.Type.CONTAINS_DEEP) {
+                    if (type == com.intuit.karate.Match.Type.CONTAINS || type == com.intuit.karate.Match.Type.CONTAINS_DEEP) {
                         return true; // all expected keys matched
                     }
                 }
                 unMatchedKeysAct.remove(key);
-            } else if (type == Match.Type.EQUALS) {
+            } else if (type == com.intuit.karate.Match.Type.EQUALS) {
                 return fail("match failed for name: '" + key + "'");
             }
         }
-        if (type == Match.Type.CONTAINS_ANY || type == Match.Type.CONTAINS_ANY_DEEP) {
+        if (type == com.intuit.karate.Match.Type.CONTAINS_ANY || type == com.intuit.karate.Match.Type.CONTAINS_ANY_DEEP) {
             return unMatchedKeysExp.isEmpty() ? true : fail("no key-values matched");
         }
         if (unMatchedKeysExp.isEmpty()) {
-            if (type == Match.Type.CONTAINS || type == Match.Type.CONTAINS_DEEP) {
+            if (type == com.intuit.karate.Match.Type.CONTAINS || type == com.intuit.karate.Match.Type.CONTAINS_DEEP) {
                 return true; // all expected keys matched, expMap was empty in the first place    
             }
-            if (type == Match.Type.NOT_CONTAINS && !expMap.isEmpty()) {
+            if (type == com.intuit.karate.Match.Type.NOT_CONTAINS && !expMap.isEmpty()) {
                 return true; // hack alert: the NOT_CONTAINS will be reversed by the calling routine
             }
         }
@@ -539,10 +541,10 @@ public class LegacyMatchOperation extends MatchOperation {
                 int expListCount = expList.size();               
                 // visited array used to handle duplicates
                 boolean[] actVisitedList = new boolean[actListCount];
-                if (type != Match.Type.CONTAINS_ANY && type != Match.Type.CONTAINS_ANY_DEEP && expListCount > actListCount) {
+                if (type != com.intuit.karate.Match.Type.CONTAINS_ANY && type != com.intuit.karate.Match.Type.CONTAINS_ANY_DEEP && expListCount > actListCount) {
                     return fail("actual array length is less than expected - " + actListCount + ":" + expListCount);
                 }
-                if ((type == Match.Type.CONTAINS_ONLY || type == Match.Type.CONTAINS_ONLY_DEEP) && expListCount != actListCount) {
+                if ((type == com.intuit.karate.Match.Type.CONTAINS_ONLY || type == com.intuit.karate.Match.Type.CONTAINS_ONLY_DEEP) && expListCount != actListCount) {
                     return fail("actual array length is not equal to expected - " + actListCount + ":" + expListCount);
                 }
                 for (Object exp : expList) { // for each item in the expected list
@@ -550,28 +552,28 @@ public class LegacyMatchOperation extends MatchOperation {
                     Match.Value expListValue = new Match.Value(exp);
                     for (int i = 0; i < actListCount; i++) {
                         Match.Value actListValue = new Match.Value(actList.get(i));
-                        Match.Type childMatchType;
+                        com.intuit.karate.Match.Type childMatchType;
                         switch (type) {
                             case CONTAINS_DEEP:
-                                childMatchType = actListValue.isMapOrListOrXml() ? Match.Type.CONTAINS_DEEP : Match.Type.EQUALS;
+                                childMatchType = actListValue.isMapOrListOrXml() ? com.intuit.karate.Match.Type.CONTAINS_DEEP : com.intuit.karate.Match.Type.EQUALS;
                                 break;
                             case CONTAINS_ONLY_DEEP:
-                                childMatchType = actListValue.isMapOrListOrXml() ? Match.Type.CONTAINS_ONLY_DEEP : Match.Type.EQUALS;
+                                childMatchType = actListValue.isMapOrListOrXml() ? com.intuit.karate.Match.Type.CONTAINS_ONLY_DEEP : com.intuit.karate.Match.Type.EQUALS;
                                 break;
                             case CONTAINS_ANY_DEEP:
-                                childMatchType = actListValue.isMapOrListOrXml() ? Match.Type.CONTAINS_ANY : Match.Type.EQUALS;
+                                childMatchType = actListValue.isMapOrListOrXml() ? com.intuit.karate.Match.Type.CONTAINS_ANY : com.intuit.karate.Match.Type.EQUALS;
                                 break;
                             default:
-                                childMatchType = Match.Type.EQUALS;
+                                childMatchType = com.intuit.karate.Match.Type.EQUALS;
                         }
                         LegacyMatchOperation mo = new LegacyMatchOperation(context.descend(i), childMatchType, actListValue, expListValue, matchEachEmptyAllowed);
                         mo.execute();
                         if (mo.pass) {
-                            if (type == Match.Type.CONTAINS_ANY || type == Match.Type.CONTAINS_ANY_DEEP) {
+                            if (type == com.intuit.karate.Match.Type.CONTAINS_ANY || type == com.intuit.karate.Match.Type.CONTAINS_ANY_DEEP) {
                                 return true; // exit early
                             }
                             // contains only : If element is found also check its occurrence in actVisitedList
-                            else if(type == Match.Type.CONTAINS_ONLY) {
+                            else if(type == com.intuit.karate.Match.Type.CONTAINS_ONLY) {
                             	// if not yet visited
                             	if(!actVisitedList[i]) {
                             		// mark it visited
@@ -587,11 +589,11 @@ public class LegacyMatchOperation extends MatchOperation {
                             }
                         }
                     }
-                    if (!found && type != Match.Type.CONTAINS_ANY && type != Match.Type.CONTAINS_ANY_DEEP) { // if we reached here, all items in the actual list were scanned
+                    if (!found && type != com.intuit.karate.Match.Type.CONTAINS_ANY && type != com.intuit.karate.Match.Type.CONTAINS_ANY_DEEP) { // if we reached here, all items in the actual list were scanned
                         return fail("actual array does not contain expected item - " + expListValue.getAsString());
                     }
                 }
-                if (type == Match.Type.CONTAINS_ANY || type == Match.Type.CONTAINS_ANY_DEEP) {
+                if (type == com.intuit.karate.Match.Type.CONTAINS_ANY || type == com.intuit.karate.Match.Type.CONTAINS_ANY_DEEP) {
                     return fail("actual array does not contain any of the expected items");
                 }
                 return true; // if we reached here, all items in the expected list were found

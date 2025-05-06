@@ -7,7 +7,7 @@ import java.math.BigDecimal;
 import java.util.*;
 
 public class MatchOperation {
-    final Match.Type type;
+    final com.intuit.karate.Match.Type type;
     final Match.Value actual;
     final Match.Value expected;
     final List<MatchOperation> failures;
@@ -20,7 +20,7 @@ public class MatchOperation {
         this(null, actual, expected, context, null);
     }
 
-    public MatchOperation(Match.Type type, Match.Value actual, Match.Value expected, Match.Context context, JsEngine js) {
+    public MatchOperation(com.intuit.karate.Match.Type type, Match.Value actual, Match.Value expected, Match.Context context, JsEngine js) {
         this.type = type;
         this.actual = actual;
         this.expected = expected;

@@ -81,7 +81,7 @@ public abstract class AbstractOperator implements Operator {
             macro = macro.substring(minLength - 1);
             if (macro.startsWith("(") && macro.endsWith(")")) {
                 macro = macro.substring(1, macro.length() - 1);
-                Match.Type nestedType = macroToMatchType(false, macro);
+                com.intuit.karate.Match.Type nestedType = macroToMatchType(false, macro);
                 int startPos = matchTypeToStartPos(nestedType);
                 Operator nestedOperator = nestedType.operator(matchEachEmptyAllowed);
                 macro = macro.substring(startPos);
@@ -128,10 +128,10 @@ public abstract class AbstractOperator implements Operator {
                             }
                             if (macro.startsWith("#")) {
                                 MatchOperation mo = new MatchOperation(context, actual, new Match.Value(macro));
-                                Match.Type.EACH_EQUALS.operator(matchEachEmptyAllowed).execute(mo);
+                                com.intuit.karate.Match.Type.EACH_EQUALS.operator(matchEachEmptyAllowed).execute(mo);
                                 return mo.pass ? operation.pass() : operation.fail("all array elements matched");
                             } else { // schema reference
-                                Match.Type nestedType = macroToMatchType(true, macro); // match each
+                                com.intuit.karate.Match.Type nestedType = macroToMatchType(true, macro); // match each
                                 int startPos = matchTypeToStartPos(nestedType);
                                 macro = macro.substring(startPos);
                                 JsValue jv = context.JS.eval(macro);
