@@ -24,20 +24,13 @@
 package com.intuit.karate;
 
 import com.intuit.karate.graal.JsEngine;
-import com.intuit.karate.graal.JsValue;
-import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  *
@@ -76,7 +69,7 @@ public class MatchOperation {
             if (js == null) {
                 js = JsEngine.global();
             }
-            this.failures = new ArrayList();
+            this.failures = new ArrayList<>();
             if (actual.isXml()) {
                 this.context = new Match.Context(js, this, true, 0, "/", "", -1);
             } else {
@@ -121,7 +114,7 @@ public class MatchOperation {
         sb.append("match failed: ").append(root.type).append('\n');
         Collections.reverse(root.failures);
         Iterator<MatchOperation> iterator = root.failures.iterator();
-        Set previousPaths = new HashSet();
+        Set<String> previousPaths = new HashSet<>();
         int index = 0;
         int prevDepth = -1;
         while (iterator.hasNext()) {

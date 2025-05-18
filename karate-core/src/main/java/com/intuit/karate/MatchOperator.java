@@ -30,7 +30,7 @@ public interface MatchOperator {
             Match.Value actual = operation.actual;
             Match.Context context = operation.context;
             if (actual.isList()) {
-                List list = actual.getValue();
+                List<?> list = actual.getValue();
                 if (list.isEmpty() && !matchEachEmptyAllowed) {
                     return operation.fail("match each failed, empty array / list");
                 }
@@ -69,8 +69,7 @@ public interface MatchOperator {
 
         public boolean execute(MatchOperation operation) {
             Match.Value expected = operation.expected;
-            // TODO Possible regression: pre 2515 would only apply this hack to CONTAINS and not CONTAINS_DEEP
-            if (delegate.isContains() && expected.isMap() && expected.<Map<?, ?>>getValue().isEmpty()) {
+            if (expected.isMap() && expected.<Map<?, ?>>getValue().isEmpty() && delegate.emptyMapShouldPass()) {
                 return true; // hack alert: support for match some_map not contains {}
             }
             MatchOperation mo = new MatchOperation(operation.context, delegate, operation.actual, expected);
@@ -82,30 +81,13 @@ public interface MatchOperator {
         }
     }
 
-    class CoreOperator implements MatchOperator {
+    abstract class CoreOperator implements MatchOperator {
 
-        private final boolean isEquals;
-        private final boolean isContains;
-        private final boolean isContainsAny;
-        private final boolean isContainsOnly;
-        private final boolean isDeep;
         private final boolean matchEachEmptyAllowed;
-        // NOt strictly required. We could create a new instance in childOperator but keeping it as an instance field
-        // is a minor optimization.
-        private final CoreOperator equalsOperator;
 
-        private CoreOperator(boolean isEquals, boolean isContains, boolean isContainsAny, boolean isContainsOnly, boolean matchEachEmptyAllowed) {
-            this(isEquals, isContains, isContainsAny, isContainsOnly, false, matchEachEmptyAllowed);
-        }
 
-        private CoreOperator(boolean isEquals, boolean isContains, boolean isContainsAny, boolean isContainsOnly, boolean isDeep, boolean matchEachEmptyAllowed) {
-            this.isEquals = isEquals;
-            this.isContains = isContains;
-            this.isContainsAny = isContainsAny;
-            this.isContainsOnly = isContainsOnly;
-            this.isDeep = isDeep;
+        protected CoreOperator(boolean matchEachEmptyAllowed) {
             this.matchEachEmptyAllowed = matchEachEmptyAllowed;
-            this.equalsOperator = isEquals?this:equalsOperator(matchEachEmptyAllowed);
         }
 
         public boolean execute(MatchOperation operation) {
@@ -117,9 +99,8 @@ public interface MatchOperator {
                     return operation.fail("actual path does not exist");
                 }
             }
-            boolean isContainsFamily = isContainsFamily();
             if (actual.type != expected.type) {
-                if (isContainsFamily &&
+                if (autoConvertToSingletonList() &&
                         // don't tamper with strings on the RHS that represent arrays or objects
                         (!expected.isList() && !(expected.isString() && expected.isArrayObjectOrReference()))) {
                     MatchOperation mo = new MatchOperation(context, this, actual, new Match.Value(Collections.singletonList(expected.getValue())));
@@ -147,12 +128,21 @@ public interface MatchOperator {
                     return macroEqualsExpected(operation, expStr) ? operation.pass() : operation.fail(null);
                 }
             }
-            if (isEquals()) {
-                return actualEqualsExpected(operation) ? operation.pass() : operation.fail("not equal");
-            } else if (isContainsFamily) {
-                return actualContainsExpected(operation) ? operation.pass() : operation.fail("actual does not contain expected");
-            }
-            throw new RuntimeException("unexpected match operator: " + this);
+            return executeNonMacro(operation);
+        }
+
+        abstract protected boolean executeNonMacro(MatchOperation operation);
+
+        abstract protected MatchOperator childOperator(Match.Value value);
+
+        abstract protected MatchOperator macroOperator(MatchOperator specifiedOperator, Match.Value actual);
+
+        abstract protected boolean emptyMapShouldPass();
+
+        abstract protected boolean autoConvertToSingletonList();
+
+        boolean isMatchEachEmptyAllowed() {
+            return matchEachEmptyAllowed;
         }
 
 
@@ -173,10 +163,7 @@ public interface MatchOperator {
                     Match.Type nestedType = macroToMatchType(false, macro);
                     int startPos = matchTypeToStartPos(nestedType);
                     macro = macro.substring(startPos);
-                    MatchOperator nestedOperator = nestedType.operator(isMatchEachEmptyAllowed());
-                    if (isContainsFamily() && actual.isList()) { // special case, look for partial maps within list
-                        nestedOperator = macroOperator(nestedOperator);
-                    }
+                    MatchOperator nestedOperator = macroOperator(nestedType.operator(isMatchEachEmptyAllowed()), actual);
                     context.JS.put("$", context.root.actual.getValue());
                     context.JS.put("_", actual.getValue());
                     JsValue jv = context.JS.eval(macro);
@@ -192,7 +179,7 @@ public interface MatchOperator {
                         }
                         if (closeBracketPos > 1) {
                             String bracketContents = macro.substring(1, closeBracketPos);
-                            List listAct = actual.getValue();
+                            List<?> listAct = actual.getValue();
                             int listSize = listAct.size();
                             context.JS.put("$", context.root.actual.getValue());
                             context.JS.put("_", listSize);
@@ -272,9 +259,7 @@ public interface MatchOperator {
                                 }
                             }
                         } else if (!validatorName.startsWith(REGEX)) { // expected is a string that happens to start with "#"
-                            String actualValue = actual.getValue();
-                            // TODO possible regression: pre 2515 checked only CONTAINS and not CONTAINS_DEEP.
-                            return isContains()?actualValue.contains(expStr):actualValue.equals(expStr);
+                            return executeNonMacro(operation);
                         }
 
                     }
@@ -344,15 +329,120 @@ public interface MatchOperator {
             }
         }
 
-        private static BigDecimal toBigDecimal(Object o) {
+        protected static BigDecimal toBigDecimal(Object o) {
             if (o instanceof BigDecimal) {
                 return (BigDecimal) o;
-            } else if (o instanceof Number) {
-                Number n = (Number) o;
+            } else if (o instanceof Number n) {
                 return BigDecimal.valueOf(n.doubleValue());
             } else {
                 throw new RuntimeException("expected number instead of: " + o);
             }
+        }
+
+        protected boolean matchMapValues(Map<String, Object> actMap, Map<String, Object> expMap, MatchOperation operation, boolean isEquals, boolean isContains, boolean isContainsAny, boolean isContainsOnly) { // combined logic for equals and contains
+            if (actMap.size() > expMap.size() && (isEquals || isContainsOnly)) {
+                int sizeDiff = actMap.size() - expMap.size();
+                Map<String, Object> diffMap = new LinkedHashMap<>(actMap);
+                for (String key : expMap.keySet()) {
+                    diffMap.remove(key);
+                }
+                return operation.fail("actual has " + sizeDiff + " more key(s) than expected - " + JsonUtils.toJson(diffMap));
+            }
+            Set<String> unMatchedKeysAct = new LinkedHashSet<>(actMap.keySet());
+            Set<String> unMatchedKeysExp = new LinkedHashSet<>(expMap.keySet());
+            for (Map.Entry<String, Object> expEntry : expMap.entrySet()) {
+                String key = expEntry.getKey();
+                Object childExp = expEntry.getValue();
+                if (!actMap.containsKey(key)) {
+                    if (childExp instanceof String childString) {
+                        if (childString.startsWith("##") || childString.equals("#ignore") || childString.equals("#notpresent")) {
+                            if (isContainsAny) {
+                                return true; // exit early
+                            }
+                            unMatchedKeysExp.remove(key);
+                            if (unMatchedKeysExp.isEmpty()) {
+                                if (isContains) {
+                                    return true; // all expected keys matched
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                    if (!isContainsAny) {
+                        return operation.fail("actual does not contain key - '" + key + "'");
+                    }
+                }
+                Match.Value childActValue = new Match.Value(actMap.get(key));
+                MatchOperator childMatchType = childOperator(childActValue);
+                MatchOperation mo = new MatchOperation(operation.context.descend(key), childMatchType, childActValue, new Match.Value(childExp));
+                mo.execute();
+                if (mo.pass) {
+                    if (isContainsAny) {
+                        return true; // exit early
+                    }
+                    unMatchedKeysExp.remove(key);
+                    if (unMatchedKeysExp.isEmpty()) {
+                        if (isContains) {
+                            return true; // all expected keys matched
+                        }
+                    }
+                    unMatchedKeysAct.remove(key);
+                } else if (isEquals) {
+                    return operation.fail("match failed for name: '" + key + "'");
+                }
+            }
+            if (isContainsAny) {
+                return unMatchedKeysExp.isEmpty() || operation.fail("no key-values matched");
+            }
+            if (unMatchedKeysExp.isEmpty()) {
+                if (isContains) {
+                    return true; // all expected keys matched, expMap was empty in the first place
+                }
+                // Special hack in pre 2515 to support match some_map not contains {} is now handled in execute() directly
+            }
+            if (!unMatchedKeysExp.isEmpty()) {
+                return operation.fail("all key-values did not match, expected has un-matched keys - " + unMatchedKeysExp);
+            }
+            if (!unMatchedKeysAct.isEmpty()) {
+                return operation.fail("all key-values did not match, actual has un-matched keys - " + unMatchedKeysAct);
+            }
+            return true;
+        }
+    }
+
+    class EqualsOperator extends CoreOperator {
+
+        protected EqualsOperator(boolean matchEachEmptyAllowed) {
+            super(matchEachEmptyAllowed);
+        }
+
+        @Override
+        protected boolean executeNonMacro(MatchOperation operation) {
+            return actualEqualsExpected(operation) ? operation.pass() : operation.fail("not equal");
+        }
+
+        @Override
+        protected MatchOperator childOperator(Match.Value value) {
+            return this;
+        }
+
+        @Override
+        protected MatchOperator macroOperator(MatchOperator specifiedOperator, Match.Value actual) {
+            return specifiedOperator;
+        }
+
+        @Override
+        protected boolean emptyMapShouldPass() {
+            return false;
+        }
+
+        @Override
+        protected boolean autoConvertToSingletonList() {
+            return false;
+        }
+
+        static CoreOperator equalsOperator(boolean matchEachEmptyAllowed) {
+            return new EqualsOperator(matchEachEmptyAllowed);
         }
 
         private boolean actualEqualsExpected(MatchOperation operation) {
@@ -383,8 +473,8 @@ public interface MatchOperator {
                     byte[] expBytes = expected.getValue();
                     return Arrays.equals(actBytes, expBytes);
                 case LIST:
-                    List actList = actual.getValue();
-                    List expList = expected.getValue();
+                    List<?> actList = actual.getValue();
+                    List<?> expList = expected.getValue();
                     int actListCount = actList.size();
                     int expListCount = expList.size();
                     if (actListCount != expListCount) {
@@ -393,7 +483,7 @@ public interface MatchOperator {
                     for (int i = 0; i < actListCount; i++) {
                         Match.Value actListValue = new Match.Value(actList.get(i));
                         Match.Value expListValue = new Match.Value(expList.get(i));
-                        MatchOperation mo = new MatchOperation(context.descend(i), equalsOperator, actListValue, expListValue);
+                        MatchOperation mo = new MatchOperation(context.descend(i), this, actListValue, expListValue);
                         mo.execute();
                         if (!mo.pass) {
                             return operation.fail("array match failed at index " + i);
@@ -403,11 +493,11 @@ public interface MatchOperator {
                 case MAP:
                     Map<String, Object> actMap = actual.getValue();
                     Map<String, Object> expMap = expected.getValue();
-                    return matchMapValues(actMap, expMap, operation);
+                    return matchMapValues(actMap, expMap, operation, true, false, false, false);
                 case XML:
                     Map<String, Object> actXml = (Map) XmlUtils.toObject(actual.getValue(), true);
                     Map<String, Object> expXml = (Map) XmlUtils.toObject(expected.getValue(), true);
-                    return matchMapValues(actXml, expXml, operation);
+                    return matchMapValues(actXml, expXml, operation, true, false, false, false);
                 case OTHER:
                     return actual.getValue().equals(expected.getValue());
                 default:
@@ -415,76 +505,119 @@ public interface MatchOperator {
             }
         }
 
-        private boolean matchMapValues(Map<String, Object> actMap, Map<String, Object> expMap, MatchOperation operation) { // combined logic for equals and contains
-            if (actMap.size() > expMap.size() && (isEquals() || isContainsOnly())) {
-                int sizeDiff = actMap.size() - expMap.size();
-                Map<String, Object> diffMap = new LinkedHashMap(actMap);
-                for (String key : expMap.keySet()) {
-                    diffMap.remove(key);
-                }
-                return operation.fail("actual has " + sizeDiff + " more key(s) than expected - " + JsonUtils.toJson(diffMap));
+        public String toString() {
+            return "EQUALS";
+        }
+    }
+
+    class ContainsFamilyOperator extends CoreOperator {
+
+        private final boolean isContains;
+        private final boolean isContainsAny;
+        private final boolean isContainsOnly;
+        private final boolean deep;
+        // NOt strictly required. We could create a new instance in childOperator but keeping it as an instance field
+        // is a minor optimization.
+        private final CoreOperator equalsOperator;
+
+        private ContainsFamilyOperator(boolean isContains, boolean isContainsAny, boolean isContainsOnly, boolean deep, boolean matchEachEmptyAllowed) {
+            super(matchEachEmptyAllowed);
+            this.isContains = isContains;
+            this.isContainsAny = isContainsAny;
+            this.isContainsOnly = isContainsOnly;
+            this.deep = deep;
+            this.equalsOperator = EqualsOperator.equalsOperator(matchEachEmptyAllowed);
+        }
+
+        @Override
+        protected boolean executeNonMacro(MatchOperation operation) {
+            return actualContainsExpected(operation) ? operation.pass() : operation.fail("actual does not contain expected");
+        }
+
+        @Override
+        protected MatchOperator childOperator(Match.Value actual) {
+            // TODO why force equals here?
+            // match [['foo'], ['bar']] contains deep 'fo'
+            // will fail if leaves are matched with equals, but should it not pass?
+            return deep && actual.isMapOrListOrXml()?this:equalsOperator;
+        }
+
+        /**
+         * The operator specified by the user (^, ^+, ...) is provided as the {@code specifiedOperator} parameter.
+         * However, when using the {@link ContainsFamilyOperator} operator, it may require some adjustments.
+         *
+         * <p>Example:
+         * <pre>{@code
+         * def actual = [{ a: 1, b: 'x' }, { a: 2, b: 'y' }]
+         * def part = { a: 1 }
+         * match actual contains '#(^part)'
+         * }</pre>
+         *
+         * In this example, {@code specifiedOperator} is {@code Contains}. However:
+         * <ul>
+         *   <li>The specified operator ({@code ^}) is applied when processing the list.</li>
+         *   <li>Child operators are applied when processing objects within the list.</li>
+         * </ul>
+         *
+         * According to {@link #childOperator(Match.Value)}, {@code Contains}' child operator is {@code Equals}.
+         * As a result, the code attempts to match {@code { a: 1, b: 'x' } equals { a: 1 }}, which fails.
+         *
+         * <p>What we actually want is to preserve both {@code Contains} operators:
+         * <ul>
+         *   <li>The one from the match instruction.</li>
+         *   <li>The one implied by the macro logic.</li>
+         * </ul>
+         * This method achieves that by creating a custom operator that effectively applies two {@code Contains} operations.
+         *
+         * <p>Note: If a third level of matching is required (e.g., the objects in {@code actual} contain other objects),
+         * it would fall back to the child operator of the child operator, which is {@code Equals}.
+         * This differs from the legacy implementation, which would enforce a deep {@code Contains},
+         * potentially triggering issue #2515.
+         *
+         * <p>That said, {@code Contains Deep} may still be specified explicitly by the user,
+         * for example, to handle nested structures like objects within objects within lists.
+         */
+        @Override
+        protected MatchOperator macroOperator(MatchOperator specifiedOperator, Match.Value actual) {
+            if (deep) {
+                return this;
             }
-            Set<String> unMatchedKeysAct = new LinkedHashSet(actMap.keySet());
-            Set<String> unMatchedKeysExp = new LinkedHashSet(expMap.keySet());
-            for (Map.Entry<String, Object> expEntry : expMap.entrySet()) {
-                String key = expEntry.getKey();
-                Object childExp = expEntry.getValue();
-                if (!actMap.containsKey(key)) {
-                    if (childExp instanceof String) {
-                        String childString = (String) childExp;
-                        if (childString.startsWith("##") || childString.equals("#ignore") || childString.equals("#notpresent")) {
-                            if (isContainsAny()) {
-                                return true; // exit early
-                            }
-                            unMatchedKeysExp.remove(key);
-                            if (unMatchedKeysExp.isEmpty()) {
-                                if (isContains()) {
-                                    return true; // all expected keys matched
-                                }
-                            }
-                            continue;
-                        }
+            if (actual.isList()) {
+                return new ContainsFamilyOperator(isContains, isContainsAny, isContainsOnly, false, isMatchEachEmptyAllowed()) {
+                    protected MatchOperator childOperator(Match.Value actual) {
+                        return specifiedOperator;
                     }
-                    if (!isContainsAny()) {
-                        return operation.fail("actual does not contain key - '" + key + "'");
-                    }
-                }
-                Match.Value childActValue = new Match.Value(actMap.get(key));
-                MatchOperator childMatchType = childOperator(childActValue);
-                MatchOperation mo = new MatchOperation(operation.context.descend(key), childMatchType, childActValue, new Match.Value(childExp));
-                mo.execute();
-                if (mo.pass) {
-                    if (isContainsAny()) {
-                        return true; // exit early
-                    }
-                    unMatchedKeysExp.remove(key);
-                    if (unMatchedKeysExp.isEmpty()) {
-                        if (isContains()) {
-                            return true; // all expected keys matched
-                        }
-                    }
-                    unMatchedKeysAct.remove(key);
-                } else if (isEquals()) {
-                    return operation.fail("match failed for name: '" + key + "'");
-                }
+                };
             }
-            if (isContainsAny()) {
-                return unMatchedKeysExp.isEmpty() ? true : operation.fail("no key-values matched");
-            }
-            if (unMatchedKeysExp.isEmpty()) {
-                if (isContains()) {
-                    return true; // all expected keys matched, expMap was empty in the first place
-                }
-                // Special hack in pre 2515 to support match some_map not contains {} is now handled in execute() directly
-            }
-            if (!unMatchedKeysExp.isEmpty()) {
-                return operation.fail("all key-values did not match, expected has un-matched keys - " + unMatchedKeysExp);
-            }
-            if (!unMatchedKeysAct.isEmpty()) {
-                return operation.fail("all key-values did not match, actual has un-matched keys - " + unMatchedKeysAct);
-            }
+            return specifiedOperator;
+        }
+
+        @Override
+        protected boolean emptyMapShouldPass() {
+            return isContains && !deep;
+        }
+
+        @Override
+        protected boolean autoConvertToSingletonList() {
             return true;
         }
+
+        ContainsFamilyOperator deep() {
+            return new ContainsFamilyOperator(isContains, isContainsAny, isContainsOnly, true, isMatchEachEmptyAllowed());
+        }
+
+        static ContainsFamilyOperator containsOperator(boolean matchEachEmptyAllowed) {
+            return new ContainsFamilyOperator(true, false, false, false, matchEachEmptyAllowed);
+        }
+
+        static ContainsFamilyOperator containsAnyOperator(boolean matchEachEmptyAllowed) {
+            return new ContainsFamilyOperator(false, true, false, false, matchEachEmptyAllowed);
+        }
+
+        static ContainsFamilyOperator containsOnlyOperator(boolean matchEachEmptyAllowed) {
+            return new ContainsFamilyOperator(false, false, true, false, matchEachEmptyAllowed);
+        }
+
 
         private boolean actualContainsExpected(MatchOperation operation) {
             Match.Value actual = operation.actual;
@@ -496,16 +629,16 @@ public interface MatchOperator {
                     String expString = expected.getValue();
                     return actString.contains(expString);
                 case LIST:
-                    List actList = actual.getValue();
-                    List expList = expected.getValue();
+                    List<?> actList = actual.getValue();
+                    List<?> expList = expected.getValue();
                     int actListCount = actList.size();
                     int expListCount = expList.size();
                     // visited array used to handle duplicates
                     boolean[] actVisitedList = new boolean[actListCount];
-                    if (!isContainsAny() && expListCount > actListCount) {
+                    if (!isContainsAny && expListCount > actListCount) {
                         return operation.fail("actual array length is less than expected - " + actListCount + ":" + expListCount);
                     }
-                    if (isContainsOnly() && expListCount != actListCount) {
+                    if (isContainsOnly && expListCount != actListCount) {
                         return operation.fail("actual array length is not equal to expected - " + actListCount + ":" + expListCount);
                     }
                     for (Object exp : expList) { // for each item in the expected list
@@ -517,12 +650,12 @@ public interface MatchOperator {
                             MatchOperation mo = new MatchOperation(context.descend(i), childMatchType, actListValue, expListValue);
                             mo.execute();
                             if (mo.pass) {
-                                if (isContainsAny()) {
+                                if (isContainsAny) {
                                     return true; // exit early
                                 }
                                 // contains only : If element is found also check its occurrence in actVisitedList
                                 // TODO Possible regression: pre 2515, only contains only (and not contains only deep) was checked
-                                else if(isContainsOnly()) {
+                                else if(isContainsOnly) {
                                     // if not yet visited
                                     if(!actVisitedList[i]) {
                                         // mark it visited
@@ -538,119 +671,34 @@ public interface MatchOperator {
                                 }
                             }
                         }
-                        if (!found && !isContainsAny()) { // if we reached here, all items in the actual list were scanned
+                        if (!found && !isContainsAny) { // if we reached here, all items in the actual list were scanned
                             return operation.fail("actual array does not contain expected item - " + expListValue.getAsString());
                         }
                     }
-                    if (isContainsAny()) {
+                    if (isContainsAny) {
                         return operation.fail("actual array does not contain any of the expected items");
                     }
                     return true; // if we reached here, all items in the expected list were found
                 case MAP:
                     Map<String, Object> actMap = actual.getValue();
                     Map<String, Object> expMap = expected.getValue();
-                    return matchMapValues(actMap, expMap, operation);
+                    return matchMapValues(actMap, expMap, operation, false, isContains, isContainsAny, isContainsOnly);
                 case XML:
                     Map<String, Object> actXml = (Map) XmlUtils.toObject(actual.getValue());
                     Map<String, Object> expXml = (Map) XmlUtils.toObject(expected.getValue());
-                    return matchMapValues(actXml, expXml, operation);
+                    return matchMapValues(actXml, expXml, operation, false, isContains, isContainsAny, isContainsOnly);
                 default:
                     throw new RuntimeException("unexpected type (match contains): " + actual.type);
             }
         }
 
-        CoreOperator deep() {
-            return new CoreOperator(isEquals, isContains, isContainsAny, isContainsOnly, true, matchEachEmptyAllowed);
-        }
-
-        static CoreOperator equalsOperator(boolean matchEachEmptyAllowed) {
-            return new CoreOperator(true, false, false, false, matchEachEmptyAllowed);
-        }
-
-        static CoreOperator containsOperator(boolean matchEachEmptyAllowed) {
-            return new CoreOperator(false, true, false, false, matchEachEmptyAllowed);
-        }
-
-        static CoreOperator containsAnyOperator(boolean matchEachEmptyAllowed) {
-            return new CoreOperator(false, false, true, false, matchEachEmptyAllowed);
-        }
-
-        static CoreOperator containsOnlyOperator(boolean matchEachEmptyAllowed) {
-            return new CoreOperator(false, false, false, true, matchEachEmptyAllowed);
-        }
-
-        boolean isEquals() {
-            return isEquals;
-        }
-
-        boolean isContains() {
-            return isContains;
-        }
-
-        boolean isContainsAny() {
-            return isContainsAny;
-        }
-
-        boolean isContainsOnly() {
-            return isContainsOnly;
-        }
-
-        boolean isContainsFamily() {
-            return isContains() || isContainsOnly() || isContainsAny();
-        }
-
-        boolean isMatchEachEmptyAllowed() {
-            return matchEachEmptyAllowed;
-        }
-
-        MatchOperator childOperator(Match.Value value) {
-            // TODO why force equals here?
-            // match [['foo'], ['bar']] contains deep 'fo'
-            // will fail if leaves are matched with equals, but should it not pass?
-            return isDeep && value.isMapOrListOrXml()?this:equalsOperator;
-        }
-
-        /**
-         * Hook to adjust the operator used for macro.
-         * <p>
-         * Whatever operator the user specified (^, ^+, ...) will be supplied as the specifiedOperator parameter.
-         * However, the Contains operator may need to tweak it a little bit.
-         * <p>
-         * Given
-         * * def actual = [{ a: 1, b: 'x' }, { a: 2, b: 'y' }]
-         * * def part = { a: 1 }
-         * * match actual contains '#(^part)'
-         * <p>
-         * specifiedOperator will be Contains. However, in this example:
-         * - the specified operator will be applied while processing the list
-         * - child operators will be applied while processing the objects within the list.
-         * And per {@link #childOperator(Match.Value)}, Contains' child operators are Equals, so the code would end up
-         * trying to match { a: 1, b: 'x' } equals { a: 1 }, which would fail.
-         * <p>
-         * What we really want here is to keep both Contains, the one from the match instruction and the one from the macro.
-         * This method does just that by creating a custom Operator that will apply 2 contains.
-         * <p>
-         * Note that should a third processing be needed (e.g. because the objects in actual contain other objects),
-         * it would use the child operator of the child operator, which would be Equals.
-         * This behavior differs from the Legacy implementation that would force a Deep Contains which would in turn cause issue #2515.
-         * <p>
-         * However, Contains Deep may still be specified at user's discretion e.g. to handle objects in objects in lists.
-         */
-        protected MatchOperator macroOperator(MatchOperator specifiedOperator) {
-            if (isContainsFamily()) {
-                return isDeep ? this : new CoreOperator(false, isContains(), isContainsAny(), isContainsOnly(), isMatchEachEmptyAllowed()) {
-                    protected MatchOperator childOperator(Match.Value actual) {
-                        return specifiedOperator;
-                    }
-                };
-            }
-            return specifiedOperator;
-        }
-
         public String toString() {
-            String operatorString = isEquals?"EQUALS":isContains?"CONTAINS":isContainsAny?"CONTAINS_ANY":"CONTAINS_ONLY";
-            return isDeep?operatorString+"_DEEP":operatorString;
+            String operatorString = isContainsAny?"CONTAINS_ANY":isContainsOnly?"CONTAINS_ONLY":"CONTAINS";
+            return deep?operatorString+"_DEEP":operatorString;
         }
+
     }
+
+
 
 }
