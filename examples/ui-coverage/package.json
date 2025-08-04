@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "coverage:instrument": "nyc instrument src/test/java/ui/html target/test-classes/ui/html",
+    "coverage:report": "nyc report --reporter=html"
+  },
+  "devDependencies": {
+    "nyc": "^17.1.0"
+  }
+}
