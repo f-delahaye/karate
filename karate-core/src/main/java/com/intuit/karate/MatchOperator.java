@@ -417,7 +417,7 @@ public interface MatchOperator {
 
         private static final Pattern UNDERSCORE_PATTERN = Pattern.compile("\\W_\\W|\\W_|_\\W");
 
-        static boolean containsPlaceholderUnderscore(String bracketContents) {
+        private static boolean containsPlaceholderUnderscore(String bracketContents) {
             Matcher m1 = UNDERSCORE_PATTERN.matcher(bracketContents);
             while (m1.find()) {
                 return true;
@@ -426,7 +426,7 @@ public interface MatchOperator {
         }
 
 
-        static Match.Type macroToMatchType(boolean each, String macro) {
+        private static Match.Type macroToMatchType(boolean each, String macro) {
             if (macro.startsWith("^^")) {
                 return each ? Match.Type.EACH_CONTAINS_ONLY : Match.Type.CONTAINS_ONLY;
             } else if (macro.startsWith("^+")) {
@@ -444,7 +444,7 @@ public interface MatchOperator {
             }
         }
 
-        static int matchTypeToStartPos(Match.Type mt) {
+        private static int matchTypeToStartPos(Match.Type mt) {
            return mt.shortcutLength;
         }
 
