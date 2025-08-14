@@ -8,12 +8,14 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static com.intuit.karate.MatchOperation.REGEX;
+import static com.intuit.karate.MatchOperator.CoreOperator.*;
 
 public interface MatchOperator {
 
     public boolean execute(MatchOperation operation);
 
     class EachOperator implements MatchOperator {
+
         private final MatchOperator delegate;
         private final boolean matchEachEmptyAllowed;
 
@@ -47,8 +49,43 @@ public interface MatchOperator {
                 }
                 // if we reached here all / each LHS items completed successfully
                 return true;
+            } else if (actual.isMap()) {
+                //#2516
+                Map<String, ?> map = actual.getValue();
+                if (map.isEmpty() && !matchEachEmptyAllowed) {
+                    return operation.fail("match each failed, empty object");
+                }
+
+                Object expected = operation.expected.getValue();
+                if (!(expected instanceof Map<?, ?> expectedMap && expectedMap.size() == 1)) {
+                    return operation.fail("incorrect syntax, match each on objects only supports expectations as {<key expression: <value expression>}");
+                }
+
+                Map.Entry<?, ?> expectedEntry = expectedMap.entrySet().iterator().next();
+                Match.Value expectedKey = new Match.Value(expectedEntry.getKey());
+                Match.Value expectedValue = new Match.Value(expectedEntry.getValue());
+
+                for (Map.Entry<String, ?> entry: map.entrySet()) {
+                    String actualKey = entry.getKey();
+
+                    MatchOperation keyMo = new MatchOperation(context.descend(actualKey), CoreOperator.equalsOperator(false), new Match.Value(actualKey), expectedKey);
+                    keyMo.execute();
+                    if (!keyMo.pass) {
+                        return operation.fail("match each key failed");
+                    }
+
+                    context.JS.put("_$", Map.of("key", actualKey, "value", entry.getValue()));
+                    MatchOperation valueMo = new MatchOperation(context.descend(actualKey), delegate, new Match.Value(entry.getValue()), expectedValue);
+                    valueMo.execute();
+                    context.JS.bindings.removeMember("_$");
+                    if (!valueMo.pass) {
+                        return operation.fail("match each value failed for key " + actualKey);
+                    }
+                }
+                // if we reached here all / each LHS items completed successfully
+                return true;
             } else {
-                return operation.fail("actual is not an array or list");
+                return operation.fail("actual is not an array or list or object");
             }
         }
 
@@ -185,54 +222,14 @@ public interface MatchOperator {
                     MatchOperation mo = new MatchOperation(context, nestedOperator, actual, new Match.Value(jv.getValue()));
                     return mo.execute();
                 } else if (macro.startsWith("[")) {
-                    int closeBracketPos = macro.indexOf(']');
-                    if (closeBracketPos != -1) { // array, match each
-                        if (!actual.isList()) {
-                            return operation.fail("actual is not an array");
-                        }
-                        if (closeBracketPos > 1) {
-                            String bracketContents = macro.substring(1, closeBracketPos);
-                            List<?> listAct = actual.getValue();
-                            int listSize = listAct.size();
-                            context.JS.put("$", context.root.actual.getValue());
-                            context.JS.put("_", listSize);
-                            String sizeExpr;
-                            if (containsPlaceholderUnderscore(bracketContents)) { // #[_ < 5]
-                                sizeExpr = bracketContents;
-                            } else { // #[5] | #[$.foo]
-                                sizeExpr = bracketContents + " == _";
-                            }
-                            JsValue jv = context.JS.eval(sizeExpr);
-                            context.JS.bindings.removeMember("$");
-                            context.JS.bindings.removeMember("_");
-                            if (!jv.isTrue()) {
-                                return operation.fail("actual array length is " + listSize);
-                            }
-                        }
-                        if (macro.length() > closeBracketPos + 1) {
-                            macro = StringUtils.trimToNull(macro.substring(closeBracketPos + 1));
-                            if (macro != null) {
-                                if (macro.startsWith("(") && macro.endsWith(")")) {
-                                    macro = macro.substring(1, macro.length() - 1); // strip parens
-                                }
-                                if (macro.startsWith("?")) { // #[]? _.length == 3
-                                    macro = "#" + macro;
-                                }
-                                if (macro.startsWith("#")) {
-                                    MatchOperation mo = new MatchOperation(context, Match.Type.EACH_EQUALS.operator(isMatchEachEmptyAllowed()), actual, new Match.Value(macro));
-                                    mo.execute();
-                                    return mo.pass ? operation.pass() : operation.fail("all array elements matched");
-                                } else { // schema reference
-                                    Match.Type nestedType = macroToMatchType(true, macro); // match each
-                                    int startPos = matchTypeToStartPos(nestedType);
-                                    macro = macro.substring(startPos);
-                                    JsValue jv = context.JS.eval(macro);
-                                    MatchOperation mo = new MatchOperation(context, nestedType.operator(isMatchEachEmptyAllowed()), actual, new Match.Value(jv.getValue()));
-                                    return mo.execute();
-                                }
-                            }
-                        }
-                        return true; // expression within square brackets is ok
+                    Boolean handled = handleEachArray(macro, context, operation, actual);
+                    if (handled != null) {
+                        return handled;
+                    }
+                } else if (macro.startsWith("{")) {
+                    Boolean handled = handleEachMap(macro, context, operation, actual);
+                    if (handled != null) {
+                        return handled;
                     }
                 } else { // '#? _ != 0' | '#string' | '#number? _ > 0'
                     int questionPos = macro.indexOf('?');
@@ -294,9 +291,133 @@ public interface MatchOperator {
             return true; // all ok
         }
 
+        private Boolean handleEachArray(String macro, Match.Context context, MatchOperation operation, Match.Value actual) {
+
+            int closeBracketPos = macro.indexOf(']');
+            if (closeBracketPos != -1) { // array, match each
+                if (!actual.isList()) {
+                    return operation.fail("actual is not an array");
+                }
+                if (closeBracketPos > 1) {
+                    String bracketContents = macro.substring(1, closeBracketPos);
+                    List<?> listAct = actual.getValue();
+                    int listSize = listAct.size();
+                    context.JS.put("$", context.root.actual.getValue());
+                    context.JS.put("_", listSize);
+                    String sizeExpr;
+                    if (containsPlaceholderUnderscore(bracketContents)) { // #[_ < 5]
+                        sizeExpr = bracketContents;
+                    } else { // #[5] | #[$.foo]
+                        sizeExpr = bracketContents + " == _";
+                    }
+                    JsValue jv = context.JS.eval(sizeExpr);
+                    context.JS.bindings.removeMember("$");
+                    context.JS.bindings.removeMember("_");
+                    if (!jv.isTrue()) {
+                        return operation.fail("actual array length is " + listSize);
+                    }
+                }
+                if (macro.length() > closeBracketPos + 1) {
+                    macro = StringUtils.trimToNull(macro.substring(closeBracketPos + 1));
+                    if (macro != null) {
+                        if (macro.startsWith("(") && macro.endsWith(")")) {
+                            macro = macro.substring(1, macro.length() - 1); // strip parens
+                        }
+                        if (macro.startsWith("?")) { // #[]? _.length == 3
+                            macro = "#" + macro;
+                        }
+                        if (macro.startsWith("#")) {
+                            MatchOperation mo = new MatchOperation(context, Match.Type.EACH_EQUALS.operator(isMatchEachEmptyAllowed()), actual, new Match.Value(macro));
+                            mo.execute();
+                            return mo.pass ? operation.pass() : operation.fail("all array elements matched");
+                        } else { // schema reference
+                            Match.Type nestedType = macroToMatchType(true, macro); // match each
+                            int startPos = matchTypeToStartPos(nestedType);
+                            macro = macro.substring(startPos);
+                            JsValue jv = context.JS.eval(macro);
+                            MatchOperation mo = new MatchOperation(context, nestedType.operator(isMatchEachEmptyAllowed()), actual, new Match.Value(jv.getValue()));
+                            return mo.execute();
+                        }
+                    }
+
+
+
+
+                }
+                return true; // expression within square brackets is ok
+            }
+            return null;
+        }
+
+        /**
+         * Returns null if the specified macro could not be evaluated by this handler
+         * Else, returns the result of the evaluation.
+         */
+        private Boolean handleEachMap(String macro, Match.Context context, MatchOperation operation, Match.Value actual) {
+
+            int closeBracketPos = macro.indexOf('}');
+            if (closeBracketPos != -1) { // map, match each
+                if (!actual.isMap()) {
+                    return operation.fail("actual is not a map");
+                }
+                if (closeBracketPos > 1) {
+                    String bracketContents = macro.substring(1, closeBracketPos);
+                    Map<?, ?> mapAct = actual.getValue();
+                    int mapSize = mapAct.size();
+                    context.JS.put("$", context.root.actual.getValue());
+                    context.JS.put("_", mapSize);
+                    String sizeExpr;
+                    if (containsPlaceholderUnderscore(bracketContents)) { // #{_ < 5}
+                        sizeExpr = bracketContents;
+                    } else { // #{5} | #{$.foo}
+                        sizeExpr = bracketContents + " == _";
+                    }
+                    JsValue jv = context.JS.eval(sizeExpr);
+                    context.JS.bindings.removeMember("$");
+                    context.JS.bindings.removeMember("_");
+                    if (!jv.isTrue()) {
+                        return operation.fail("actual map length is " + mapSize);
+                    }
+                }
+                if (macro.length() > closeBracketPos + 1) {
+                    macro = StringUtils.trimToNull(macro.substring(closeBracketPos + 1));
+                    if (macro != null) {
+                        if (macro.startsWith("(") && macro.endsWith(")")) {
+                            macro = macro.substring(1, macro.length() - 1); // strip parens
+                        }
+                        if (macro.startsWith("?")) { // #{}? _.length == 3
+                            macro = "#" + macro;
+                        }
+                        if (macro.startsWith("#")) {
+                            MatchOperation mo = new MatchOperation(context, Match.Type.EACH_EQUALS.operator(isMatchEachEmptyAllowed()), new Match.Value(new ArrayList<>(actual.<Map>getValue().values())), new Match.Value(macro));
+                            mo.execute();
+                            return mo.pass ? operation.pass() : operation.fail("some properties of the object did not match");
+                        } else { // schema reference
+                            Match.Type nestedType = macroToMatchType(true, macro); // match each
+                            int startPos = matchTypeToStartPos(nestedType);
+                            macro = macro.substring(startPos);
+                            Object schemaReference = Json.parse(macro);
+                            Match.Value expected;
+                            if (!(schemaReference instanceof Map)) {
+                                actual = new Match.Value(new ArrayList<>(actual.<Map>getValue().values()));
+                                expected = new Match.Value(context.JS.eval(macro).getValue());
+                            } else {
+                                expected = new Match.Value(schemaReference);
+                            }
+                            MatchOperation mo = new MatchOperation(context, nestedType.operator(isMatchEachEmptyAllowed()), actual, expected);
+                            return mo.execute();
+                        }
+                    }
+                }
+                return true; // expression within square brackets is ok
+            }
+            return null;
+        }
+
+
         private static final Pattern UNDERSCORE_PATTERN = Pattern.compile("\\W_\\W|\\W_|_\\W");
 
-        private boolean containsPlaceholderUnderscore(String bracketContents) {
+        static boolean containsPlaceholderUnderscore(String bracketContents) {
             Matcher m1 = UNDERSCORE_PATTERN.matcher(bracketContents);
             while (m1.find()) {
                 return true;
@@ -305,7 +426,7 @@ public interface MatchOperator {
         }
 
 
-        private static Match.Type macroToMatchType(boolean each, String macro) {
+        static Match.Type macroToMatchType(boolean each, String macro) {
             if (macro.startsWith("^^")) {
                 return each ? Match.Type.EACH_CONTAINS_ONLY : Match.Type.CONTAINS_ONLY;
             } else if (macro.startsWith("^+")) {
@@ -323,7 +444,7 @@ public interface MatchOperator {
             }
         }
 
-        private static int matchTypeToStartPos(Match.Type mt) {
+        static int matchTypeToStartPos(Match.Type mt) {
            return mt.shortcutLength;
         }
 
